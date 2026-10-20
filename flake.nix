@@ -26,9 +26,14 @@
       # here or `nix flake check` silently runs without it.
       extraSourceFilter =
         path: type: builtins.match ".*/\\.config/nextest\\.toml" (toString path) != null;
+      # Verus is pinned to one exact rustc, which rust-toolchain.toml selects.
+      extraShellPackages = pkgs: [
+        (pkgs.callPackage ./nix/verus.nix {
+          rustToolchain = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
+        })
+      ];
       # Escape hatches (see the template repo's README):
       #   projectName = "my-project";
-      #   extraShellPackages = pkgs: [ pkgs.mdbook ];
       #   extraBuildPackages = pkgs: [ pkgs.pkg-config ];
       #   extraChecks = pkgs: { };
       #   extraCiCommands = "cargo run --locked -p hello --example smoke";

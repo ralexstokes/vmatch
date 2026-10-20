@@ -5,7 +5,7 @@
 
 use hdrhistogram::Histogram;
 use rand::rngs::SmallRng;
-use rand::{Rng, SeedableRng};
+use rand::{RngExt, SeedableRng};
 use std::time::Instant;
 use vmatch_core::{Command, Engine, Event, OrdType, Side, Tif};
 
@@ -19,7 +19,7 @@ struct Load {
 impl Load {
     fn price(&mut self, side: Side, aggressive: bool) -> u32 {
         // passive orders 1..40 ticks behind mid; aggressive ones cross by 0..3
-        let d = if aggressive { -self.rng.gen_range(0..4) } else { self.rng.gen_range(1..40) };
+        let d = if aggressive { -self.rng.random_range(0..4) } else { self.rng.random_range(1..40) };
         let p = match side {
             Side::Buy => self.mid - d,
             Side::Sell => self.mid + d,
@@ -28,26 +28,26 @@ impl Load {
     }
 
     fn next(&mut self) -> Command {
-        if self.rng.gen_ratio(1, 1000) {
-            self.mid = (self.mid + self.rng.gen_range(-2..=2)).clamp(100, self.ticks as i64 - 100);
+        if self.rng.random_ratio(1, 1000) {
+            self.mid = (self.mid + self.rng.random_range(-2..=2)).clamp(100, self.ticks as i64 - 100);
         }
-        let side = if self.rng.gen_bool(0.5) { Side::Buy } else { Side::Sell };
-        let r = self.rng.gen_range(0..100);
+        let side = if self.rng.random_bool(0.5) { Side::Buy } else { Side::Sell };
+        let r = self.rng.random_range(0..100);
         if r < 45 || self.live.is_empty() {
             let p = self.price(side, false);
-            Command::New { side, ord_type: OrdType::Limit, tif: Tif::Gtc, price: p, qty: self.rng.gen_range(1..100) }
+            Command::New { side, ord_type: OrdType::Limit, tif: Tif::Gtc, price: p, qty: self.rng.random_range(1..100) }
         } else if r < 55 {
             let p = self.price(side, true);
-            let tif = if self.rng.gen_bool(0.7) { Tif::Ioc } else { Tif::Gtc };
-            Command::New { side, ord_type: OrdType::Limit, tif, price: p, qty: self.rng.gen_range(1..300) }
+            let tif = if self.rng.random_bool(0.7) { Tif::Ioc } else { Tif::Gtc };
+            Command::New { side, ord_type: OrdType::Limit, tif, price: p, qty: self.rng.random_range(1..300) }
         } else if r < 85 {
-            let i = self.rng.gen_range(0..self.live.len());
+            let i = self.rng.random_range(0..self.live.len());
             let (id, _) = self.live.swap_remove(i);
             Command::Cancel { id }
         } else {
-            let i = self.rng.gen_range(0..self.live.len());
+            let i = self.rng.random_range(0..self.live.len());
             let (id, p) = self.live.swap_remove(i);
-            Command::Replace { id, price: p, qty: self.rng.gen_range(1..100), post_only: false }
+            Command::Replace { id, price: p, qty: self.rng.random_range(1..100), post_only: false }
         }
     }
 
@@ -75,9 +75,9 @@ fn main() {
 
     // warm up: build a deep book
     while load.live.len() < resting {
-        let side = if load.rng.gen_bool(0.5) { Side::Buy } else { Side::Sell };
+        let side = if load.rng.random_bool(0.5) { Side::Buy } else { Side::Sell };
         let p = load.price(side, false);
-        let c = Command::New { side, ord_type: OrdType::Limit, tif: Tif::Gtc, price: p, qty: load.rng.gen_range(1..100) };
+        let c = Command::New { side, ord_type: OrdType::Limit, tif: Tif::Gtc, price: p, qty: load.rng.random_range(1..100) };
         ev.clear();
         eng.step(c, &mut ev);
         load.observe(&ev, &mut lp);

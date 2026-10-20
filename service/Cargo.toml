@@ -10,7 +10,7 @@ vmatch-core = { path = "../core" }
 crc32fast = "1"
 
 [dev-dependencies]
-rand = { version = "0.8", features = ["small_rng"] }
+rand = "0.10"
 hdrhistogram = "7"
 
 [lints]
