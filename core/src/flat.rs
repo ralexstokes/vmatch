@@ -30,6 +30,7 @@ pub proof fn lemma_flat_add(a: Seq<Seq<SOrder>>, b: Seq<Seq<SOrder>>)
 pub proof fn lemma_flat_one(x: Seq<SOrder>)
     ensures flat(seq![x]) =~= x,
 {
+    reveal_with_fuel(flat, 2);
     assert(seq![x].drop_first() =~= Seq::<Seq<SOrder>>::empty());
 }
 
