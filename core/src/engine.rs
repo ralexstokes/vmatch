@@ -3,13 +3,9 @@
 //! includes the model invariant `spec::inv`. Together with the theorems in
 //! `props.rs` this gives the engine's guarantees.
 
-use vstd::prelude::*;
+use crate::{arena::*, flat::*, props::*, spec::*, types::*};
 use alloc::vec::Vec;
-use crate::types::*;
-use crate::spec::*;
-use crate::props::*;
-use crate::flat::*;
-use crate::arena::*;
+use vstd::prelude::*;
 
 verus! {
 
@@ -1798,5 +1794,3 @@ proof fn lemma_live_side_pushed(n0: Seq<Node>, n1: Seq<Node>, e0: Engine, side: 
 }
 
 } // verus!
-
-

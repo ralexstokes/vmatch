@@ -1,10 +1,8 @@
 //! Lemmas relating a ladder of FIFO price levels (`Seq<Seq<SOrder>>`, indexed
 //! by priority index) to the single priority-ordered sequence of the model.
 
+use crate::{props::*, spec::*, types::*};
 use vstd::prelude::*;
-use crate::types::*;
-use crate::spec::*;
-use crate::props::*;
 
 verus! {
 

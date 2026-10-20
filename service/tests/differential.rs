@@ -2,8 +2,7 @@
 mod common;
 
 use vmatch_core::{Engine, Event};
-use vmatch_service::oracle::Model;
-use vmatch_service::wire::event_eq;
+use vmatch_service::{oracle::Model, wire::event_eq};
 
 fn run(seed: u64, ticks: u32, cap: u32, max_qty: u64, n: usize) {
     let mut eng = Engine::try_new(ticks, cap).unwrap();
@@ -21,8 +20,16 @@ fn run(seed: u64, ticks: u32, cap: u32, max_qty: u64, n: usize) {
             e1.len() == e2.len() && e1.iter().zip(&e2).all(|(a, b)| event_eq(a, b)),
             "seed {seed} step {i}: {c:?}\nengine: {e1:?}\nmodel:  {e2:?}"
         );
-        assert_eq!(eng.best_bid(), model.bids.first().map(|o| o.price), "seed {seed} step {i}");
-        assert_eq!(eng.best_ask(), model.asks.first().map(|o| o.price), "seed {seed} step {i}");
+        assert_eq!(
+            eng.best_bid(),
+            model.bids.first().map(|o| o.price),
+            "seed {seed} step {i}"
+        );
+        assert_eq!(
+            eng.best_ask(),
+            model.asks.first().map(|o| o.price),
+            "seed {seed} step {i}"
+        );
         g.observe(&e1);
     }
 }

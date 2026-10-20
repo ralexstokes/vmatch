@@ -7,8 +7,8 @@
 //! abstraction of its state, so every theorem proven about this model in
 //! `props.rs` holds for the engine.
 
-use vstd::prelude::*;
 use crate::types::*;
+use vstd::prelude::*;
 
 verus! {
 

@@ -18,9 +18,8 @@
 //! * `theorem_replay_compose` — replay is compositional, so snapshot + log
 //!                              suffix recovery equals full replay.
 
+use crate::{spec::*, types::*};
 use vstd::prelude::*;
-use crate::types::*;
-use crate::spec::*;
 
 verus! {
 

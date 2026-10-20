@@ -4,9 +4,11 @@ mod common;
 
 use std::io::Write;
 use vmatch_core::{Command, Event};
-use vmatch_service::journal::{self, SyncMode};
-use vmatch_service::sequencer::Sequencer;
-use vmatch_service::wire::event_eq;
+use vmatch_service::{
+    journal::{self, SyncMode},
+    sequencer::Sequencer,
+    wire::event_eq,
+};
 
 fn tmp(name: &str) -> std::path::PathBuf {
     let d = std::env::temp_dir().join(format!("vmatch-test-{}-{name}", std::process::id()));
@@ -16,12 +18,16 @@ fn tmp(name: &str) -> std::path::PathBuf {
 
 fn collect(s: &mut Sequencer, cmds: &[Command]) -> Vec<Vec<Event>> {
     let mut out = Vec::new();
-    s.process_batch(cmds, |_, _, ev| out.push(ev.to_vec())).unwrap();
+    s.process_batch(cmds, |_, _, ev| out.push(ev.to_vec()))
+        .unwrap();
     out
 }
 
 fn same(a: &[Vec<Event>], b: &[Vec<Event>]) -> bool {
-    a.len() == b.len() && a.iter().zip(b).all(|(x, y)| x.len() == y.len() && x.iter().zip(y).all(|(p, q)| event_eq(p, q)))
+    a.len() == b.len()
+        && a.iter()
+            .zip(b)
+            .all(|(x, y)| x.len() == y.len() && x.iter().zip(y).all(|(p, q)| event_eq(p, q)))
 }
 
 #[test]
@@ -98,7 +104,10 @@ fn torn_tail_is_truncated_and_mid_file_corruption_is_fatal() {
     let mut data = std::fs::read(&p).unwrap();
     data[journal::HDR_LEN + 10 * journal::REC_LEN + 5] ^= 0xFF;
     std::fs::write(&p, &data).unwrap();
-    assert!(matches!(journal::read(&p), Err(journal::JournalError::Corrupt { .. })));
+    assert!(matches!(
+        journal::read(&p),
+        Err(journal::JournalError::Corrupt { .. })
+    ));
 
     // wrong instrument configuration is refused
     assert!(Sequencer::recover(&p, ticks + 1, cap, SyncMode::NoSync).is_err());

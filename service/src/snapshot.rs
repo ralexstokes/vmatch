@@ -8,9 +8,11 @@
 //! bids (id u64, price u32, qty u64)* | asks (same)* | free u32* | crc32 u32`.
 //! Written to a temporary file, fsynced, then atomically renamed.
 
-use std::fs::{self, File};
-use std::io::{self, Read, Write};
-use std::path::Path;
+use std::{
+    fs::{self, File},
+    io::{self, Read, Write},
+    path::Path,
+};
 use vmatch_core::{Engine, SOrder};
 
 pub const MAGIC: &[u8; 4] = b"VMS1";
@@ -33,21 +35,44 @@ impl Snapshot {
         let mut asks = Vec::new();
         let mut free = Vec::new();
         let next_seq = e.export(&mut bids, &mut asks, &mut free);
-        Snapshot { ticks: e.ticks(), cap, applied, next_seq, bids, asks, free }
+        Snapshot {
+            ticks: e.ticks(),
+            cap,
+            applied,
+            next_seq,
+            bids,
+            asks,
+            free,
+        }
     }
 
     /// Rebuild an engine; `None` if the state violates any engine invariant.
     pub fn restore(&self) -> Option<Engine> {
-        Engine::import(self.ticks, self.cap, &self.bids, &self.asks, &self.free, self.next_seq)
+        Engine::import(
+            self.ticks,
+            self.cap,
+            &self.bids,
+            &self.asks,
+            &self.free,
+            self.next_seq,
+        )
     }
 
     fn encode(&self) -> Vec<u8> {
-        let mut b = Vec::with_capacity(56 + 20 * (self.bids.len() + self.asks.len()) + 4 * self.free.len() + 4);
+        let mut b = Vec::with_capacity(
+            56 + 20 * (self.bids.len() + self.asks.len()) + 4 * self.free.len() + 4,
+        );
         b.extend_from_slice(MAGIC);
         b.extend_from_slice(&VERSION.to_le_bytes());
         b.extend_from_slice(&self.ticks.to_le_bytes());
         b.extend_from_slice(&self.cap.to_le_bytes());
-        for v in [self.applied, self.next_seq, self.bids.len() as u64, self.asks.len() as u64, self.free.len() as u64] {
+        for v in [
+            self.applied,
+            self.next_seq,
+            self.bids.len() as u64,
+            self.asks.len() as u64,
+            self.free.len() as u64,
+        ] {
             b.extend_from_slice(&v.to_le_bytes());
         }
         for o in self.bids.iter().chain(self.asks.iter()) {
@@ -78,8 +103,14 @@ impl Snapshot {
         }
         let (ticks, cap) = (u32_at(8), u32_at(12));
         let (applied, next_seq) = (u64_at(16), u64_at(24));
-        let (nb, na, nf) = (u64_at(32) as usize, u64_at(40) as usize, u64_at(48) as usize);
-        let need = 56usize.checked_add(nb.checked_add(na)?.checked_mul(20)?)?.checked_add(nf.checked_mul(4)?)?;
+        let (nb, na, nf) = (
+            u64_at(32) as usize,
+            u64_at(40) as usize,
+            u64_at(48) as usize,
+        );
+        let need = 56usize
+            .checked_add(nb.checked_add(na)?.checked_mul(20)?)?
+            .checked_add(nf.checked_mul(4)?)?;
         if body.len() != need {
             return None;
         }
@@ -87,7 +118,11 @@ impl Snapshot {
         let mut orders = |n: usize| {
             let mut v = Vec::with_capacity(n);
             for _ in 0..n {
-                v.push(SOrder { id: u64_at(off), price: u32_at(off + 8), qty: u64_at(off + 12) });
+                v.push(SOrder {
+                    id: u64_at(off),
+                    price: u32_at(off + 8),
+                    qty: u64_at(off + 12),
+                });
                 off += 20;
             }
             v
@@ -95,7 +130,15 @@ impl Snapshot {
         let bids = orders(nb);
         let asks = orders(na);
         let free = (0..nf).map(|i| u32_at(off + 4 * i)).collect();
-        Some(Snapshot { ticks, cap, applied, next_seq, bids, asks, free })
+        Some(Snapshot {
+            ticks,
+            cap,
+            applied,
+            next_seq,
+            bids,
+            asks,
+            free,
+        })
     }
 
     /// Atomically write to `path` (via `path.tmp`, fsync, rename, fsync dir).
@@ -108,7 +151,11 @@ impl Snapshot {
         }
         fs::rename(&tmp, path)?;
         if let Some(dir) = path.parent() {
-            if let Ok(d) = File::open(if dir.as_os_str().is_empty() { Path::new(".") } else { dir }) {
+            if let Ok(d) = File::open(if dir.as_os_str().is_empty() {
+                Path::new(".")
+            } else {
+                dir
+            }) {
                 let _ = d.sync_all();
             }
         }
