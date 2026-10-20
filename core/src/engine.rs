@@ -3,13 +3,9 @@
 //! includes the model invariant `spec::inv`. Together with the theorems in
 //! `props.rs` this gives the engine's guarantees.
 
-use vstd::prelude::*;
+use crate::{arena::*, flat::*, props::*, spec::*, types::*};
 use alloc::vec::Vec;
-use crate::types::*;
-use crate::spec::*;
-use crate::props::*;
-use crate::flat::*;
-use crate::arena::*;
+use vstd::prelude::*;
 
 verus! {
 
@@ -38,7 +34,7 @@ pub open spec fn side_partition(nodes: Seq<Node>, lad: Ladder, side: Side, ticks
         ==> in_lad(nodes, lad, side, ticks, s)
 }
 
-pub open spec fn lad_of(e: Engine, side: Side) -> Ladder {
+spec fn lad_of(e: Engine, side: Side) -> Ladder {
     match side {
         Side::Buy => e.bids,
         Side::Sell => e.asks,
@@ -203,18 +199,18 @@ pub fn match_exec(
         lim < ticks,
     ensures ({
         let r = match_loop(ticks, ms, side_view(old(nodes)@, *old(lad)), lim as int, qty, taker, old(free)@);
-        &&& side_view(nodes@, *lad) == r.0
+        &&& side_view(final(nodes)@, *final(lad)) == r.0
         &&& rem == r.1
-        &&& out@ == old(out)@ + r.2
-        &&& free@ == r.3
-        &&& ladder_wf(nodes@, *lad, ms, ticks)
-        &&& free_wf(nodes@, *free_head, free@)
-        &&& side_partition(nodes@, *lad, ms, ticks)
-        &&& frame(old(nodes)@, nodes@, ms, -1)
-        &&& forall|s: int| 0 <= s < nodes@.len() ==> (#[trigger] nodes@[s]).live ==> old(nodes)@[s].live
-        &&& forall|s: int| 0 <= s < nodes@.len() ==> #[trigger] nodes@[s].side == old(nodes)@[s].side
-        &&& forall|s: int| 0 <= s < nodes@.len() ==> #[trigger] nodes@[s].price == old(nodes)@[s].price
-        &&& forall|x: u32| #[trigger] free@.contains(x) ==> old(free)@.contains(x)
+        &&& final(out)@ == old(out)@ + r.2
+        &&& final(free)@ == r.3
+        &&& ladder_wf(final(nodes)@, *final(lad), ms, ticks)
+        &&& free_wf(final(nodes)@, *final(free_head), final(free)@)
+        &&& side_partition(final(nodes)@, *final(lad), ms, ticks)
+        &&& frame(old(nodes)@, final(nodes)@, ms, -1)
+        &&& forall|s: int| 0 <= s < final(nodes)@.len() ==> (#[trigger] final(nodes)@[s]).live ==> old(nodes)@[s].live
+        &&& forall|s: int| 0 <= s < final(nodes)@.len() ==> #[trigger] final(nodes)@[s].side == old(nodes)@[s].side
+        &&& forall|s: int| 0 <= s < final(nodes)@.len() ==> #[trigger] final(nodes)@[s].price == old(nodes)@[s].price
+        &&& forall|x: u32| #[trigger] final(free)@.contains(x) ==> old(free)@.contains(x)
             || (old(nodes)@[x as int].live && old(nodes)@[x as int].side == ms)
     }),
 {
@@ -559,9 +555,9 @@ impl Engine {
     pub fn step(&mut self, cmd: Command, out: &mut Vec<Event>)
         requires old(self).wf(),
         ensures
-            self.wf(),
-            self.view() == step(old(self).view(), cmd).0,
-            out@ == old(out)@ + step(old(self).view(), cmd).1,
+            final(self).wf(),
+            final(self).view() == step(old(self).view(), cmd).0,
+            final(out)@ == old(out)@ + step(old(self).view(), cmd).1,
     {
         let ghost s0 = self.view();
         match cmd {
@@ -575,7 +571,7 @@ impl Engine {
     }
 
     fn reject(&self, r: RejectReason, out: &mut Vec<Event>)
-        ensures out@ == old(out)@ + seq![Event::Rejected { reason: r }],
+        ensures final(out)@ == old(out)@ + seq![Event::Rejected { reason: r }],
     {
         out.push(Event::Rejected { reason: r });
         proof { assert(out@ =~= old(out)@ + seq![Event::Rejected { reason: r }]); }
@@ -677,9 +673,9 @@ impl Engine {
             inv(old(self).view()),
             submit_ok(old(self).view(), side, price, qty, tif),
         ensures
-            self.wf_core(),
-            self.view() == submit(old(self).view(), side, price, qty, tif).0,
-            out@ == old(out)@ + submit(old(self).view(), side, price, qty, tif).1,
+            final(self).wf_core(),
+            final(self).view() == submit(old(self).view(), side, price, qty, tif).0,
+            final(out)@ == old(out)@ + submit(old(self).view(), side, price, qty, tif).1,
     {
         let ghost s0 = self.view();
         let ghost out0 = out@;
@@ -779,9 +775,9 @@ impl Engine {
     fn exec_new(&mut self, side: Side, ord_type: OrdType, tif: Tif, price: u32, qty: u64, out: &mut Vec<Event>)
         requires old(self).wf(),
         ensures
-            self.wf_core(),
-            self.view() == step_new(old(self).view(), side, ord_type, tif, price, qty).0,
-            out@ == old(out)@ + step_new(old(self).view(), side, ord_type, tif, price, qty).1,
+            final(self).wf_core(),
+            final(self).view() == step_new(old(self).view(), side, ord_type, tif, price, qty).0,
+            final(out)@ == old(out)@ + step_new(old(self).view(), side, ord_type, tif, price, qty).1,
     {
         let market = match ord_type { OrdType::Market => true, OrdType::Limit => false };
         if market {
@@ -864,9 +860,9 @@ impl Engine {
     fn exec_cancel(&mut self, id: u64, out: &mut Vec<Event>)
         requires old(self).wf(),
         ensures
-            self.wf_core(),
-            self.view() == step_cancel(old(self).view(), id).0,
-            out@ == old(out)@ + step_cancel(old(self).view(), id).1,
+            final(self).wf_core(),
+            final(self).view() == step_cancel(old(self).view(), id).0,
+            final(out)@ == old(out)@ + step_cancel(old(self).view(), id).1,
     {
         match self.lookup(id) {
             None => {
@@ -893,8 +889,8 @@ impl Engine {
             let L = ladder_view(old(self).nodes@, lad_of(*old(self), n.side).lists@);
             let t = idx(old(self).ticks, n.side, n.price);
             let i = lad_of(*old(self), n.side).lists@[t].index_of(slot);
-            &&& self.wf_core()
-            &&& self.view() == remove_at(old(self).view(), n.side, flat_pos(L, t, i))
+            &&& final(self).wf_core()
+            &&& final(self).view() == remove_at(old(self).view(), n.side, flat_pos(L, t, i))
             &&& book(old(self).view(), n.side)[flat_pos(L, t, i)] == ord(n)
         }),
     {
@@ -952,9 +948,9 @@ impl Engine {
     fn exec_replace(&mut self, id: u64, price: u32, qty: u64, post_only: bool, out: &mut Vec<Event>)
         requires old(self).wf(),
         ensures
-            self.wf_core(),
-            self.view() == step_replace(old(self).view(), id, price, qty, post_only).0,
-            out@ == old(out)@ + step_replace(old(self).view(), id, price, qty, post_only).1,
+            final(self).wf_core(),
+            final(self).view() == step_replace(old(self).view(), id, price, qty, post_only).0,
+            final(out)@ == old(out)@ + step_replace(old(self).view(), id, price, qty, post_only).1,
     {
         let ghost s0 = self.view();
         if price >= self.ticks {
@@ -1268,7 +1264,7 @@ fn key_lt_exec(ticks: u32, side: Side, a: SOrder, b: SOrder) -> (r: bool)
 /// Push every order of one ladder, best level first, FIFO within a level.
 fn export_side(nodes: &Vec<Node>, lad: &Ladder, side: Side, ticks: u32, out: &mut Vec<SOrder>)
     requires ladder_wf(nodes@, *lad, side, ticks),
-    ensures out@ == old(out)@ + side_view(nodes@, *lad),
+    ensures final(out)@ == old(out)@ + side_view(nodes@, *lad),
 {
     let ghost L = ladder_view(nodes@, lad.lists@);
     let ghost out0 = out@;
@@ -1402,11 +1398,10 @@ impl Engine {
     pub fn export(&self, bids: &mut Vec<SOrder>, asks: &mut Vec<SOrder>, free: &mut Vec<u32>) -> (next_seq: u64)
         requires self.wf(),
         ensures
-            bids@ == old(bids)@ + self.view().bids,
-            asks@ == old(asks)@ + self.view().asks,
-            free@ == old(free)@ + self.view().free,
+            final(bids)@ == old(bids)@ + self.view().bids,
+            final(asks)@ == old(asks)@ + self.view().asks,
+            final(free)@ == old(free)@ + self.view().free,
             next_seq == self.view().next_seq,
-            self.view().ticks == self.ticks,
     {
         export_side(&self.nodes, &self.bids, Side::Buy, self.ticks, bids);
         export_side(&self.nodes, &self.asks, Side::Sell, self.ticks, asks);
@@ -1543,9 +1538,9 @@ fn mark_side(used: &mut Vec<bool>, b: &Vec<SOrder>, cap: u32) -> (r: bool)
         old(used)@.len() == cap,
         forall|k: int| 0 <= k < b@.len() ==> slot_of((#[trigger] b@[k]).id) < cap,
     ensures
-        used@.len() == cap,
-        forall|x: int| 0 <= x < cap && old(used)@[x] ==> #[trigger] used@[x],
-        r ==> forall|k: int| 0 <= k < b@.len() ==> #[trigger] used@[slot_of(b@[k].id)],
+        final(used)@.len() == cap,
+        forall|x: int| 0 <= x < cap && old(used)@[x] ==> #[trigger] final(used)@[x],
+        r ==> forall|k: int| 0 <= k < b@.len() ==> #[trigger] final(used)@[slot_of(b@[k].id)],
         r ==> forall|k: int| 0 <= k < b@.len() ==> !old(used)@[slot_of((#[trigger] b@[k]).id)],
         r ==> forall|k1: int, k2: int| 0 <= k1 < k2 < b@.len() ==> slot_of(b@[k1].id) != slot_of(b@[k2].id),
 {
@@ -1595,17 +1590,17 @@ impl Engine {
             forall|k: int| 0 <= k < b@.len() ==> !old(self).nodes@[slot_of((#[trigger] b@[k]).id)].live,
             forall|k1: int, k2: int| 0 <= k1 < k2 < b@.len() ==> slot_of(b@[k1].id) != slot_of(b@[k2].id),
         ensures
-            self.ticks == old(self).ticks, self.cap == old(self).cap, self.next_seq == old(self).next_seq,
-            self.free == old(self).free, self.free_head == old(self).free_head,
-            self.nodes@.len() == old(self).nodes@.len(),
-            ladder_wf(self.nodes@, self.bids, Side::Buy, self.ticks),
-            ladder_wf(self.nodes@, self.asks, Side::Sell, self.ticks),
-            side_partition(self.nodes@, self.bids, Side::Buy, self.ticks),
-            side_partition(self.nodes@, self.asks, Side::Sell, self.ticks),
-            side_view(self.nodes@, lad_of(*self, side)) == b@,
-            side_view(self.nodes@, lad_of(*self, opp(side))) == side_view(old(self).nodes@, lad_of(*old(self), opp(side))),
-            forall|s: int| 0 <= s < self.nodes@.len() && !(exists|k: int| 0 <= k < b@.len() && slot_of(#[trigger] b@[k].id) == s)
-                ==> #[trigger] self.nodes@[s] == old(self).nodes@[s],
+            final(self).ticks == old(self).ticks, final(self).cap == old(self).cap, final(self).next_seq == old(self).next_seq,
+            final(self).free == old(self).free, final(self).free_head == old(self).free_head,
+            final(self).nodes@.len() == old(self).nodes@.len(),
+            ladder_wf(final(self).nodes@, final(self).bids, Side::Buy, final(self).ticks),
+            ladder_wf(final(self).nodes@, final(self).asks, Side::Sell, final(self).ticks),
+            side_partition(final(self).nodes@, final(self).bids, Side::Buy, final(self).ticks),
+            side_partition(final(self).nodes@, final(self).asks, Side::Sell, final(self).ticks),
+            side_view(final(self).nodes@, lad_of(*final(self), side)) == b@,
+            side_view(final(self).nodes@, lad_of(*final(self), opp(side))) == side_view(old(self).nodes@, lad_of(*old(self), opp(side))),
+            forall|s: int| 0 <= s < final(self).nodes@.len() && !(exists|k: int| 0 <= k < b@.len() && slot_of(#[trigger] b@[k].id) == s)
+                ==> #[trigger] final(self).nodes@[s] == old(self).nodes@[s],
     {
         let ticks = self.ticks;
         let ghost n0 = self.nodes@;
@@ -1701,14 +1696,14 @@ impl Engine {
             forall|a: int| 0 <= a < f@.len() ==> (#[trigger] f@[a]) < old(self).cap && !old(self).nodes@[f@[a] as int].live,
             forall|a: int, b: int| 0 <= a < b < f@.len() ==> f@[a] != f@[b],
         ensures
-            self.free@ == f@,
-            free_wf(self.nodes@, self.free_head, self.free@),
-            self.nodes@.len() == old(self).nodes@.len(),
-            forall|s: int| 0 <= s < self.nodes@.len() ==> payload_same(#[trigger] self.nodes@[s], old(self).nodes@[s])
-                && self.nodes@[s].live == old(self).nodes@[s].live && self.nodes@[s].prev == old(self).nodes@[s].prev,
-            forall|s: int| 0 <= s < self.nodes@.len() && old(self).nodes@[s].live ==> #[trigger] self.nodes@[s] == old(self).nodes@[s],
-            self.ticks == old(self).ticks, self.cap == old(self).cap, self.next_seq == old(self).next_seq,
-            self.bids == old(self).bids, self.asks == old(self).asks,
+            final(self).free@ == f@,
+            free_wf(final(self).nodes@, final(self).free_head, final(self).free@),
+            final(self).nodes@.len() == old(self).nodes@.len(),
+            forall|s: int| 0 <= s < final(self).nodes@.len() ==> payload_same(#[trigger] final(self).nodes@[s], old(self).nodes@[s])
+                && final(self).nodes@[s].live == old(self).nodes@[s].live && final(self).nodes@[s].prev == old(self).nodes@[s].prev,
+            forall|s: int| 0 <= s < final(self).nodes@.len() && old(self).nodes@[s].live ==> #[trigger] final(self).nodes@[s] == old(self).nodes@[s],
+            final(self).ticks == old(self).ticks, final(self).cap == old(self).cap, final(self).next_seq == old(self).next_seq,
+            final(self).bids == old(self).bids, final(self).asks == old(self).asks,
     {
         let mut j = f.len();
         proof { assert(f@.skip(j as int) =~= Seq::<u32>::empty()); }
@@ -1799,5 +1794,3 @@ proof fn lemma_live_side_pushed(n0: Seq<Node>, n1: Seq<Node>, e0: Engine, side: 
 }
 
 } // verus!
-
-

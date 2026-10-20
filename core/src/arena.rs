@@ -2,11 +2,9 @@
 //! FIFO lists (one per price level per side) and a singly linked free stack.
 //! Every operation is O(1) and allocation-free.
 
-use vstd::prelude::*;
+use crate::{flat::*, spec::*, types::*};
 use alloc::vec::Vec;
-use crate::types::*;
-use crate::spec::*;
-use crate::flat::*;
+use vstd::prelude::*;
 
 verus! {
 
@@ -251,15 +249,15 @@ pub fn push_back(
         valid_qty(qty),
         slot_of(id) == slot,
     ensures
-        ladder_wf(nodes@, *lad, side, ticks),
-        lad.lists@ == old(lad).lists@.update(t as int, old(lad).lists@[t as int].push(slot)),
-        frame(old(nodes)@, nodes@, side, slot as int),
-        nodes@[slot as int].live,
-        nodes@[slot as int].side == side,
-        ord(nodes@[slot as int]) == (SOrder { id, price, qty }),
-        forall|s: int| 0 <= s < nodes@.len() && s != slot ==>
-            payload_same(#[trigger] nodes@[s], old(nodes)@[s]) && nodes@[s].live == old(nodes)@[s].live,
-        ladder_view(nodes@, lad.lists@) =~= ladder_view(old(nodes)@, old(lad).lists@).update(
+        ladder_wf(final(nodes)@, *final(lad), side, ticks),
+        final(lad).lists@ == old(lad).lists@.update(t as int, old(lad).lists@[t as int].push(slot)),
+        frame(old(nodes)@, final(nodes)@, side, slot as int),
+        final(nodes)@[slot as int].live,
+        final(nodes)@[slot as int].side == side,
+        ord(final(nodes)@[slot as int]) == (SOrder { id, price, qty }),
+        forall|s: int| 0 <= s < final(nodes)@.len() && s != slot ==>
+            payload_same(#[trigger] final(nodes)@[s], old(nodes)@[s]) && final(nodes)@[s].live == old(nodes)@[s].live,
+        ladder_view(final(nodes)@, final(lad).lists@) =~= ladder_view(old(nodes)@, old(lad).lists@).update(
             t as int,
             ladder_view(old(nodes)@, old(lad).lists@)[t as int].push(SOrder { id, price, qty }),
         ),
@@ -355,17 +353,17 @@ pub fn unlink(nodes: &mut Vec<Node>, lad: &mut Ladder, side: Side, ticks: u32, t
         0 <= i < old(lad).lists@[t as int].len(),
         old(lad).lists@[t as int][i] == slot,
     ensures
-        ladder_wf(nodes@, *lad, side, ticks),
-        lad.lists@ == old(lad).lists@.update(t as int, old(lad).lists@[t as int].remove(i)),
-        frame(old(nodes)@, nodes@, side, -1),
-        !nodes@[slot as int].live,
-        ord(nodes@[slot as int]) == ord(old(nodes)@[slot as int]),
-        nodes@[slot as int].side == old(nodes)@[slot as int].side,
-        nodes@[slot as int].price == old(nodes)@[slot as int].price,
-        forall|s: int| 0 <= s < nodes@.len() && s != slot ==> #[trigger] nodes@[s].live == old(nodes)@[s].live,
-        forall|s: int| 0 <= s < nodes@.len() ==> payload_same(#[trigger] nodes@[s], old(nodes)@[s]),
-        nodes@.len() == old(nodes)@.len(),
-        ladder_view(nodes@, lad.lists@) =~= ladder_view(old(nodes)@, old(lad).lists@).update(
+        ladder_wf(final(nodes)@, *final(lad), side, ticks),
+        final(lad).lists@ == old(lad).lists@.update(t as int, old(lad).lists@[t as int].remove(i)),
+        frame(old(nodes)@, final(nodes)@, side, -1),
+        !final(nodes)@[slot as int].live,
+        ord(final(nodes)@[slot as int]) == ord(old(nodes)@[slot as int]),
+        final(nodes)@[slot as int].side == old(nodes)@[slot as int].side,
+        final(nodes)@[slot as int].price == old(nodes)@[slot as int].price,
+        forall|s: int| 0 <= s < final(nodes)@.len() && s != slot ==> #[trigger] final(nodes)@[s].live == old(nodes)@[s].live,
+        forall|s: int| 0 <= s < final(nodes)@.len() ==> payload_same(#[trigger] final(nodes)@[s], old(nodes)@[s]),
+        final(nodes)@.len() == old(nodes)@.len(),
+        ladder_view(final(nodes)@, final(lad).lists@) =~= ladder_view(old(nodes)@, old(lad).lists@).update(
             t as int,
             ladder_view(old(nodes)@, old(lad).lists@)[t as int].remove(i),
         ),
@@ -500,15 +498,15 @@ pub fn set_qty(nodes: &mut Vec<Node>, lad: &Ladder, side: Side, ticks: u32, t: u
         lad.lists@[t as int][i] == slot,
         valid_qty(qty),
     ensures
-        ladder_wf(nodes@, *lad, side, ticks),
-        frame(old(nodes)@, nodes@, side, -1),
-        forall|s: int| 0 <= s < nodes@.len() ==> #[trigger] nodes@[s].live == old(nodes)@[s].live,
-        forall|s: int| 0 <= s < nodes@.len() ==> #[trigger] nodes@[s].side == old(nodes)@[s].side,
-        forall|s: int| 0 <= s < nodes@.len() ==> #[trigger] nodes@[s].price == old(nodes)@[s].price,
-        forall|s: int| 0 <= s < nodes@.len() && s != slot ==> #[trigger] nodes@[s] == old(nodes)@[s],
-        nodes@.len() == old(nodes)@.len(),
-        nodes@[slot as int] == (Node { qty, ..old(nodes)@[slot as int] }),
-        ladder_view(nodes@, lad.lists@) =~= ladder_view(old(nodes)@, lad.lists@).update(
+        ladder_wf(final(nodes)@, *lad, side, ticks),
+        frame(old(nodes)@, final(nodes)@, side, -1),
+        forall|s: int| 0 <= s < final(nodes)@.len() ==> #[trigger] final(nodes)@[s].live == old(nodes)@[s].live,
+        forall|s: int| 0 <= s < final(nodes)@.len() ==> #[trigger] final(nodes)@[s].side == old(nodes)@[s].side,
+        forall|s: int| 0 <= s < final(nodes)@.len() ==> #[trigger] final(nodes)@[s].price == old(nodes)@[s].price,
+        forall|s: int| 0 <= s < final(nodes)@.len() && s != slot ==> #[trigger] final(nodes)@[s] == old(nodes)@[s],
+        final(nodes)@.len() == old(nodes)@.len(),
+        final(nodes)@[slot as int] == (Node { qty, ..old(nodes)@[slot as int] }),
+        ladder_view(final(nodes)@, lad.lists@) =~= ladder_view(old(nodes)@, lad.lists@).update(
             t as int,
             ladder_view(old(nodes)@, lad.lists@)[t as int].update(i, SOrder { qty, ..ladder_view(old(nodes)@, lad.lists@)[t as int][i] }),
         ),
@@ -559,10 +557,10 @@ pub fn free_push(nodes: &mut Vec<Node>, head: &mut u32, Ghost(f): Ghost<Seq<u32>
         !f.contains(slot),
     ensures
         r@ == seq![slot] + f,
-        free_wf(nodes@, *head, r@),
-        nodes@.len() == old(nodes)@.len(),
-        forall|s: int| 0 <= s < nodes@.len() && s != slot ==> #[trigger] nodes@[s] == old(nodes)@[s],
-        nodes@[slot as int] == (Node { next: *old(head), ..old(nodes)@[slot as int] }),
+        free_wf(final(nodes)@, *final(head), r@),
+        final(nodes)@.len() == old(nodes)@.len(),
+        forall|s: int| 0 <= s < final(nodes)@.len() && s != slot ==> #[trigger] final(nodes)@[s] == old(nodes)@[s],
+        final(nodes)@[slot as int] == (Node { next: *old(head), ..old(nodes)@[slot as int] }),
 {
     let mut n = nodes[slot as usize];
     n.next = *head;
@@ -597,7 +595,7 @@ pub fn free_pop(nodes: &Vec<Node>, head: &mut u32, Ghost(f): Ghost<Seq<u32>>) ->
     ensures
         r.0 == f[0],
         r.1@ == f.drop_first(),
-        free_wf(nodes@, *head, r.1@),
+        free_wf(nodes@, *final(head), r.1@),
         (r.0 as int) < nodes@.len(),
         !nodes@[r.0 as int].live,
         !r.1@.contains(r.0),

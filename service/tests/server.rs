@@ -2,12 +2,16 @@
 //! carries the same batches.
 mod common;
 
-use std::io::{Read, Write};
-use std::net::TcpStream;
+use std::{
+    io::{Read, Write},
+    net::TcpStream,
+};
 use vmatch_core::{Engine, Event};
-use vmatch_service::journal::SyncMode;
-use vmatch_service::server::{start, Config};
-use vmatch_service::wire::{decode_event, encode_command, event_eq, BATCH_HDR_LEN, EVT_LEN};
+use vmatch_service::{
+    journal::SyncMode,
+    server::{start, Config},
+    wire::{decode_event, encode_command, event_eq, BATCH_HDR_LEN, EVT_LEN},
+};
 
 fn read_batch(s: &mut TcpStream) -> (u64, Vec<Event>) {
     let mut h = [0u8; BATCH_HDR_LEN];
@@ -51,7 +55,10 @@ fn tcp_round_trip_matches_engine() {
         c.write_all(&encode_command(&cmd)).unwrap();
         let (seq, got) = read_batch(&mut c);
         assert_eq!(seq, i);
-        assert!(want.len() == got.len() && want.iter().zip(&got).all(|(a, b)| event_eq(a, b)), "cmd {i}");
+        assert!(
+            want.len() == got.len() && want.iter().zip(&got).all(|(a, b)| event_eq(a, b)),
+            "cmd {i}"
+        );
         let (fseq, fgot) = read_batch(&mut feed);
         assert_eq!(fseq, i);
         assert!(fgot.len() == got.len() && fgot.iter().zip(&got).all(|(a, b)| event_eq(a, b)));

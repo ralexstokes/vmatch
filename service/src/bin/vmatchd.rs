@@ -1,6 +1,8 @@
 use std::path::PathBuf;
-use vmatch_service::journal::SyncMode;
-use vmatch_service::server::{run, Config};
+use vmatch_service::{
+    journal::SyncMode,
+    server::{run, Config},
+};
 
 const USAGE: &str = "usage: vmatchd [--listen ADDR] [--feed ADDR] [--ticks N] [--capacity N]
                [--journal PATH] [--no-fsync] [--max-batch N]
@@ -26,7 +28,10 @@ fn main() {
     };
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
-        let mut val = || args.next().unwrap_or_else(|| die(&format!("missing value for {a}")));
+        let mut val = || {
+            args.next()
+                .unwrap_or_else(|| die(&format!("missing value for {a}")))
+        };
         match a.as_str() {
             "--listen" => cfg.order_addr = val(),
             "--feed" => cfg.feed_addr = Some(val()),
@@ -34,7 +39,9 @@ fn main() {
             "--capacity" => cfg.cap = val().parse().unwrap_or_else(|_| die("bad --capacity")),
             "--journal" => cfg.journal = Some(PathBuf::from(val())),
             "--no-fsync" => cfg.sync = SyncMode::NoSync,
-            "--max-batch" => cfg.max_batch = val().parse().unwrap_or_else(|_| die("bad --max-batch")),
+            "--max-batch" => {
+                cfg.max_batch = val().parse().unwrap_or_else(|_| die("bad --max-batch"))
+            }
             "-h" | "--help" => {
                 println!("{USAGE}");
                 return;

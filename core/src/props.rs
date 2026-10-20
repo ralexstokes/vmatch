@@ -2,25 +2,21 @@
 //! `spec::step`, every theorem here is a theorem about the engine.
 //!
 //! Headline results (all for any state satisfying `inv`):
-//! * `theorem_inv`            — every command preserves the invariant: both
-//!                              sides strictly sorted by price-time priority,
-//!                              ids unique, quantities in range, book never
-//!                              crossed (best bid < best ask).
-//! * `theorem_ledger`         — quantity is conserved: resting quantity changes
-//!                              by exactly what the events report.
-//! * `theorem_new_order`      — a new order fills strictly against the front
-//!                              of the opposite book (price-time priority),
-//!                              every fill is at the maker's price and within
-//!                              the taker's limit, taker quantity is fully
-//!                              accounted for, FOK is all-or-nothing and
-//!                              post-only never takes liquidity.
-//! * `theorem_reject_noop`    — a rejected command changes nothing.
-//! * `theorem_replay_compose` — replay is compositional, so snapshot + log
-//!                              suffix recovery equals full replay.
+//! * `theorem_inv`: every command preserves the invariant: both sides
+//!   strictly sorted by price-time priority, ids unique, quantities in range,
+//!   book never crossed (best bid < best ask).
+//! * `theorem_ledger`: quantity is conserved: resting quantity changes by
+//!   exactly what the events report.
+//! * `theorem_new_order`: a new order fills strictly against the front of the
+//!   opposite book (price-time priority), every fill is at the maker's price
+//!   and within the taker's limit, taker quantity is fully accounted for, FOK
+//!   is all-or-nothing and post-only never takes liquidity.
+//! * `theorem_reject_noop`: a rejected command changes nothing.
+//! * `theorem_replay_compose`: replay is compositional, so snapshot + log
+//!   suffix recovery equals full replay.
 
+use crate::{spec::*, types::*};
 use vstd::prelude::*;
-use crate::types::*;
-use crate::spec::*;
 
 verus! {
 
@@ -123,6 +119,7 @@ pub proof fn lemma_qsum_split(bk: Seq<SOrder>, j: int)
     requires 0 <= j < bk.len(),
     ensures qsum(bk) == qsum(bk.take(j)) + bk[j].qty + qsum(bk.skip(j + 1)),
 {
+    reveal_with_fuel(qsum, 2);
     assert(bk =~= bk.take(j) + (seq![bk[j]] + bk.skip(j + 1)));
     lemma_qsum_add(bk.take(j), seq![bk[j]] + bk.skip(j + 1));
     lemma_qsum_add(seq![bk[j]], bk.skip(j + 1));
@@ -189,12 +186,14 @@ pub proof fn lemma_delta_sum_add(a: Seq<Event>, b: Seq<Event>)
 pub proof fn lemma_delta_sum_one(e: Event)
     ensures delta_sum(seq![e]) == book_delta(e),
 {
+    reveal_with_fuel(delta_sum, 2);
     assert(seq![e].drop_first() =~= Seq::<Event>::empty());
 }
 
 pub proof fn lemma_fsum_one(e: Event)
     ensures fsum(seq![e]) == fill_qty(e),
 {
+    reveal_with_fuel(fsum, 2);
     assert(seq![e].drop_first() =~= Seq::<Event>::empty());
 }
 
@@ -565,7 +564,7 @@ pub proof fn lemma_submit(s: SState, side: Side, price: u32, qty: u64, tif: Tif)
         let ms = opp(side);
         let id = make_id(s.next_seq, s.free[0]);
         let fills = submit_fills(s, side, price, qty);
-        let tail = r.1.skip(1 + fills.len());
+        let tail = r.1.skip(1 + fills.len() as int);
         &&& inv(r.0)
         &&& r.1 =~= seq![Event::Accepted { id, side, price, qty }] + fills + tail
         &&& fills_follow_priority(fills, book(s, ms), id)
@@ -611,7 +610,7 @@ pub proof fn lemma_submit(s: SState, side: Side, price: u32, qty: u64, tif: Tif)
         Seq::<Event>::empty()
     };
     assert(r.1 =~= seq![Event::Accepted { id, side, price, qty }] + fills + tail);
-    assert(r.1.skip(1 + fills.len()) =~= tail);
+    assert(r.1.skip(1 + fills.len() as int) =~= tail);
 
     // own side after
     lemma_ok_mono(ticks, s.next_seq, ns, own);
@@ -880,7 +879,7 @@ pub proof fn theorem_new_order(s: SState, side: Side, ord_type: OrdType, tif: Ti
         let ms = opp(side);
         let id = make_id(s.next_seq, s.free[0]);
         let fills = submit_fills(s, side, px, qty);
-        let tail = r.1.skip(1 + fills.len());
+        let tail = r.1.skip(1 + fills.len() as int);
         !(r.1[0] is Rejected) ==> {
             &&& r.1 =~= seq![Event::Accepted { id, side, price: px, qty }] + fills + tail
             &&& fills_follow_priority(fills, book(s, ms), id)

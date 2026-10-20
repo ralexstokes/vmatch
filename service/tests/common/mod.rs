@@ -1,6 +1,5 @@
 #![allow(dead_code)]
-use rand::rngs::SmallRng;
-use rand::{Rng, SeedableRng};
+use rand::{rngs::SmallRng, RngExt, SeedableRng};
 use vmatch_core::{Command, Event, OrdType, Side, Tif};
 
 /// Random command generator that mostly targets live orders, with a mix of
@@ -17,7 +16,15 @@ pub struct Gen {
 
 impl Gen {
     pub fn new(seed: u64, ticks: u32, max_qty: u64) -> Self {
-        Gen { rng: SmallRng::seed_from_u64(seed), ticks, live: vec![], info: Default::default(), pending_price: Default::default(), mid: ticks / 2, max_qty }
+        Gen {
+            rng: SmallRng::seed_from_u64(seed),
+            ticks,
+            live: vec![],
+            info: Default::default(),
+            pending_price: Default::default(),
+            mid: ticks / 2,
+            max_qty,
+        }
     }
 
     pub fn observe(&mut self, events: &[Event]) {
@@ -60,67 +67,94 @@ impl Gen {
 
     fn price(&mut self) -> u32 {
         // random walk around a drifting mid, occasionally anywhere/invalid
-        if self.rng.gen_ratio(1, 50) {
-            self.mid = self.rng.gen_range(0..self.ticks);
+        if self.rng.random_ratio(1, 50) {
+            self.mid = self.rng.random_range(0..self.ticks);
         }
-        let r = self.rng.gen_range(0..100);
+        let r = self.rng.random_range(0..100);
         if r < 2 {
-            self.ticks + self.rng.gen_range(0..3) // invalid
+            self.ticks + self.rng.random_range(0..3) // invalid
         } else if r < 5 {
-            self.rng.gen_range(0..self.ticks)
+            self.rng.random_range(0..self.ticks)
         } else {
             let w = 6i64;
-            (self.mid as i64 + self.rng.gen_range(-w..=w)).clamp(0, self.ticks as i64 - 1) as u32
+            (self.mid as i64 + self.rng.random_range(-w..=w)).clamp(0, self.ticks as i64 - 1) as u32
         }
     }
 
     fn qty(&mut self) -> u64 {
-        let r = self.rng.gen_range(0..100);
+        let r = self.rng.random_range(0..100);
         if r < 1 {
             0
         } else if r < 2 {
-            vmatch_core::MAX_QTY + self.rng.gen_range(0..2)
+            vmatch_core::MAX_QTY + self.rng.random_range(0..2)
         } else if r < 3 {
             vmatch_core::MAX_QTY
         } else {
-            self.rng.gen_range(1..=self.max_qty)
+            self.rng.random_range(1..=self.max_qty)
         }
     }
 
     pub fn next(&mut self) -> Command {
-        let r = self.rng.gen_range(0..100);
-        let side = if self.rng.gen_bool(0.5) { Side::Buy } else { Side::Sell };
+        let r = self.rng.random_range(0..100);
+        let side = if self.rng.random_bool(0.5) {
+            Side::Buy
+        } else {
+            Side::Sell
+        };
         if r < 55 {
-            let (ord_type, tif) = match self.rng.gen_range(0..100) {
+            let (ord_type, tif) = match self.rng.random_range(0..100) {
                 0..=59 => (OrdType::Limit, Tif::Gtc),
                 60..=69 => (OrdType::Limit, Tif::Ioc),
                 70..=77 => (OrdType::Limit, Tif::Fok),
                 78..=87 => (OrdType::Limit, Tif::PostOnly),
                 88..=93 => (OrdType::Market, Tif::Ioc),
                 94..=97 => (OrdType::Market, Tif::Fok),
-                _ => (OrdType::Market, if self.rng.gen_bool(0.5) { Tif::Gtc } else { Tif::PostOnly }),
+                _ => (
+                    OrdType::Market,
+                    if self.rng.random_bool(0.5) {
+                        Tif::Gtc
+                    } else {
+                        Tif::PostOnly
+                    },
+                ),
             };
-            Command::New { side, ord_type, tif, price: self.price(), qty: self.qty() }
+            Command::New {
+                side,
+                ord_type,
+                tif,
+                price: self.price(),
+                qty: self.qty(),
+            }
         } else if r < 80 {
             let id = self.pick_id();
             Command::Cancel { id }
         } else {
             let id = self.pick_id();
-            if let (true, Some(&(p, q))) = (self.rng.gen_bool(0.4), self.info.get(&id)) {
+            if let (true, Some(&(p, q))) = (self.rng.random_bool(0.4), self.info.get(&id)) {
                 // in-place reduction (keeps priority), sometimes to the same qty
-                let nq = self.rng.gen_range(1..=q);
-                return Command::Replace { id, price: p, qty: nq, post_only: false };
+                let nq = self.rng.random_range(1..=q);
+                return Command::Replace {
+                    id,
+                    price: p,
+                    qty: nq,
+                    post_only: false,
+                };
             }
-            Command::Replace { id, price: self.price(), qty: self.qty(), post_only: self.rng.gen_ratio(1, 5) }
+            Command::Replace {
+                id,
+                price: self.price(),
+                qty: self.qty(),
+                post_only: self.rng.random_ratio(1, 5),
+            }
         }
     }
 
     fn pick_id(&mut self) -> u64 {
-        if !self.live.is_empty() && self.rng.gen_ratio(19, 20) {
-            let i = self.rng.gen_range(0..self.live.len());
+        if !self.live.is_empty() && self.rng.random_ratio(19, 20) {
+            let i = self.rng.random_range(0..self.live.len());
             self.live[i]
         } else {
-            self.rng.gen()
+            self.rng.random()
         }
     }
 }

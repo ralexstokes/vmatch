@@ -4,11 +4,12 @@
 //!   cargo run --release -p vmatch-service --example loadgen -- 127.0.0.1:9100 200000
 
 use hdrhistogram::Histogram;
-use rand::rngs::SmallRng;
-use rand::{Rng, SeedableRng};
-use std::io::{Read, Write};
-use std::net::TcpStream;
-use std::time::Instant;
+use rand::{rngs::SmallRng, RngExt, SeedableRng};
+use std::{
+    io::{Read, Write},
+    net::TcpStream,
+    time::Instant,
+};
 use vmatch_core::{Command, OrdType, Side, Tif};
 use vmatch_service::wire::{decode_event, encode_command, BATCH_HDR_LEN, EVT_LEN};
 
@@ -23,15 +24,28 @@ fn main() {
     let mut hist = Histogram::<u64>::new_with_bounds(1, 1_000_000_000, 3).unwrap();
     let t0 = Instant::now();
     for _ in 0..n {
-        let side = if rng.gen_bool(0.5) { Side::Buy } else { Side::Sell };
-        let cmd = if live.len() > 1000 && rng.gen_bool(0.4) {
-            Command::Cancel { id: live.swap_remove(rng.gen_range(0..live.len())) }
+        let side = if rng.random_bool(0.5) {
+            Side::Buy
         } else {
-            let p = 32_768 + match side {
-                Side::Buy => -rng.gen_range(-2..40),
-                Side::Sell => rng.gen_range(-2..40),
-            };
-            Command::New { side, ord_type: OrdType::Limit, tif: Tif::Gtc, price: p as u32, qty: rng.gen_range(1..100) }
+            Side::Sell
+        };
+        let cmd = if live.len() > 1000 && rng.random_bool(0.4) {
+            Command::Cancel {
+                id: live.swap_remove(rng.random_range(0..live.len())),
+            }
+        } else {
+            let p = 32_768
+                + match side {
+                    Side::Buy => -rng.random_range(-2..40),
+                    Side::Sell => rng.random_range(-2..40),
+                };
+            Command::New {
+                side,
+                ord_type: OrdType::Limit,
+                tif: Tif::Gtc,
+                price: p as u32,
+                qty: rng.random_range(1..100),
+            }
         };
         let st = Instant::now();
         s.write_all(&encode_command(&cmd)).unwrap();
@@ -48,7 +62,11 @@ fn main() {
         hist.record(st.elapsed().as_nanos() as u64).unwrap();
     }
     let el = t0.elapsed();
-    println!("{n} round trips in {:.2}s ({:.0}/s, one outstanding)", el.as_secs_f64(), n as f64 / el.as_secs_f64());
+    println!(
+        "{n} round trips in {:.2}s ({:.0}/s, one outstanding)",
+        el.as_secs_f64(),
+        n as f64 / el.as_secs_f64()
+    );
     for q in [0.5, 0.9, 0.99, 0.999] {
         println!("  p{:<6} {:>9} ns", q * 100.0, hist.value_at_quantile(q));
     }

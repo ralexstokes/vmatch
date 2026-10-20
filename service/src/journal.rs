@@ -11,9 +11,11 @@
 //! on open.
 
 use crate::wire::{decode_command, encode_command, CMD_LEN};
-use std::fs::{File, OpenOptions};
-use std::io::{self, Read, Seek, SeekFrom, Write};
-use std::path::Path;
+use std::{
+    fs::{File, OpenOptions},
+    io::{self, Read, Seek, SeekFrom, Write},
+    path::Path,
+};
 use vmatch_core::Command;
 
 pub const MAGIC: &[u8; 4] = b"VMJ1";
@@ -39,11 +41,21 @@ pub enum SyncMode {
 pub enum JournalError {
     Io(io::Error),
     BadHeader,
-    HeaderMismatch { found: Header, expected: Header },
+    HeaderMismatch {
+        found: Header,
+        expected: Header,
+    },
     /// A record in the middle of the file is corrupt (not just a torn tail).
-    Corrupt { offset: u64 },
-    BadCommand { seq: u64 },
-    SeqGap { expected: u64, found: u64 },
+    Corrupt {
+        offset: u64,
+    },
+    BadCommand {
+        seq: u64,
+    },
+    SeqGap {
+        expected: u64,
+        found: u64,
+    },
 }
 
 impl From<io::Error> for JournalError {
@@ -86,7 +98,10 @@ pub fn read(path: &Path) -> Result<Contents, JournalError> {
     let mut f = File::open(path)?;
     let mut data = Vec::new();
     f.read_to_end(&mut data)?;
-    if data.len() < HDR_LEN || &data[0..4] != MAGIC || u32::from_le_bytes(data[4..8].try_into().unwrap()) != VERSION {
+    if data.len() < HDR_LEN
+        || &data[0..4] != MAGIC
+        || u32::from_le_bytes(data[4..8].try_into().unwrap()) != VERSION
+    {
         return Err(JournalError::BadHeader);
     }
     let header = Header {
@@ -109,7 +124,10 @@ pub fn read(path: &Path) -> Result<Contents, JournalError> {
         }
         let seq = u64::from_le_bytes(rec[4..12].try_into().unwrap());
         if seq != commands.len() as u64 {
-            return Err(JournalError::SeqGap { expected: commands.len() as u64, found: seq });
+            return Err(JournalError::SeqGap {
+                expected: commands.len() as u64,
+                found: seq,
+            });
         }
         let cmd_bytes: &[u8; CMD_LEN] = rec[12..].try_into().unwrap();
         let cmd = decode_command(cmd_bytes).map_err(|_| JournalError::BadCommand { seq })?;
@@ -142,15 +160,27 @@ impl Writer {
         h.extend_from_slice(&header.cap.to_le_bytes());
         file.write_all(&h)?;
         file.sync_all()?;
-        Ok(Writer { file, buf: Vec::with_capacity(1 << 16), next_seq: 0, sync })
+        Ok(Writer {
+            file,
+            buf: Vec::with_capacity(1 << 16),
+            next_seq: 0,
+            sync,
+        })
     }
 
     /// Open an existing journal for appending after recovery: validates it,
     /// truncates a torn tail, and returns the commands to replay.
-    pub fn open(path: &Path, expected: Header, sync: SyncMode) -> Result<(Self, Vec<Command>), JournalError> {
+    pub fn open(
+        path: &Path,
+        expected: Header,
+        sync: SyncMode,
+    ) -> Result<(Self, Vec<Command>), JournalError> {
         let c = read(path)?;
         if c.header != expected {
-            return Err(JournalError::HeaderMismatch { found: c.header, expected });
+            return Err(JournalError::HeaderMismatch {
+                found: c.header,
+                expected,
+            });
         }
         let mut file = OpenOptions::new().write(true).open(path)?;
         if c.torn_bytes > 0 {
@@ -159,7 +189,15 @@ impl Writer {
         }
         file.seek(SeekFrom::Start(c.valid_len))?;
         let next_seq = c.commands.len() as u64;
-        Ok((Writer { file, buf: Vec::with_capacity(1 << 16), next_seq, sync }, c.commands))
+        Ok((
+            Writer {
+                file,
+                buf: Vec::with_capacity(1 << 16),
+                next_seq,
+                sync,
+            },
+            c.commands,
+        ))
     }
 
     pub fn next_seq(&self) -> u64 {

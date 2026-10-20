@@ -119,7 +119,13 @@ pub fn decode_command(b: &[u8; CMD_LEN]) -> Result<Command, DecodeError> {
                 3 => Tif::PostOnly,
                 x => return Err(DecodeError::BadTif(x)),
             };
-            Ok(Command::New { side, ord_type, tif, price, qty })
+            Ok(Command::New {
+                side,
+                ord_type,
+                tif,
+                price,
+                qty,
+            })
         }
         2 => Ok(Command::Cancel { id }),
         3 => {
@@ -128,7 +134,12 @@ pub fn decode_command(b: &[u8; CMD_LEN]) -> Result<Command, DecodeError> {
                 1 => true,
                 x => return Err(DecodeError::BadSide(x)),
             };
-            Ok(Command::Replace { id, price, qty, post_only })
+            Ok(Command::Replace {
+                id,
+                price,
+                qty,
+                post_only,
+            })
         }
         x => Err(DecodeError::BadKind(x)),
     }
@@ -137,7 +148,13 @@ pub fn decode_command(b: &[u8; CMD_LEN]) -> Result<Command, DecodeError> {
 pub fn encode_command(c: &Command) -> [u8; CMD_LEN] {
     let mut b = [0u8; CMD_LEN];
     match *c {
-        Command::New { side, ord_type, tif, price, qty } => {
+        Command::New {
+            side,
+            ord_type,
+            tif,
+            price,
+            qty,
+        } => {
             b[0] = 1;
             b[1] = side_to(side);
             b[2] = match ord_type {
@@ -152,7 +169,12 @@ pub fn encode_command(c: &Command) -> [u8; CMD_LEN] {
             b[0] = 2;
             b[16..24].copy_from_slice(&id.to_le_bytes());
         }
-        Command::Replace { id, price, qty, post_only } => {
+        Command::Replace {
+            id,
+            price,
+            qty,
+            post_only,
+        } => {
             b[0] = 3;
             b[1] = post_only as u8;
             b[4..8].copy_from_slice(&price.to_le_bytes());
@@ -166,8 +188,18 @@ pub fn encode_command(c: &Command) -> [u8; CMD_LEN] {
 pub fn encode_event(e: &Event, out: &mut [u8; EVT_LEN]) {
     *out = [0u8; EVT_LEN];
     let (kind, sb, price, a, bb, c) = match *e {
-        Event::Accepted { id, side, price, qty } => (1u8, side_to(side), price, id, qty, 0),
-        Event::Fill { taker, maker, price, qty } => (2, 0, price, taker, maker, qty),
+        Event::Accepted {
+            id,
+            side,
+            price,
+            qty,
+        } => (1u8, side_to(side), price, id, qty, 0),
+        Event::Fill {
+            taker,
+            maker,
+            price,
+            qty,
+        } => (2, 0, price, taker, maker, qty),
         Event::Rested { id, qty } => (3, 0, 0, id, qty, 0),
         Event::Expired { id, qty } => (4, 0, 0, id, qty, 0),
         Event::Cancelled { id, qty } => (5, 0, 0, id, qty, 0),
@@ -188,13 +220,29 @@ pub fn decode_event(b: &[u8; EVT_LEN]) -> Option<Event> {
     let bb = u64_at(b, 16);
     let c = u64_at(b, 24);
     Some(match b[0] {
-        1 => Event::Accepted { id: a, side: side_from(b[1]).ok()?, price, qty: bb },
-        2 => Event::Fill { taker: a, maker: bb, price, qty: c },
+        1 => Event::Accepted {
+            id: a,
+            side: side_from(b[1]).ok()?,
+            price,
+            qty: bb,
+        },
+        2 => Event::Fill {
+            taker: a,
+            maker: bb,
+            price,
+            qty: c,
+        },
         3 => Event::Rested { id: a, qty: bb },
         4 => Event::Expired { id: a, qty: bb },
         5 => Event::Cancelled { id: a, qty: bb },
-        6 => Event::Reduced { id: a, from: bb, to: c },
-        7 => Event::Rejected { reason: reason_from(b[1])? },
+        6 => Event::Reduced {
+            id: a,
+            from: bb,
+            to: c,
+        },
+        7 => Event::Rejected {
+            reason: reason_from(b[1])?,
+        },
         _ => return None,
     })
 }
@@ -232,10 +280,27 @@ mod tests {
     #[test]
     fn command_roundtrip() {
         let cmds = [
-            Command::New { side: Side::Buy, ord_type: OrdType::Limit, tif: Tif::Gtc, price: 7, qty: 9 },
-            Command::New { side: Side::Sell, ord_type: OrdType::Market, tif: Tif::Fok, price: 0, qty: u64::MAX },
+            Command::New {
+                side: Side::Buy,
+                ord_type: OrdType::Limit,
+                tif: Tif::Gtc,
+                price: 7,
+                qty: 9,
+            },
+            Command::New {
+                side: Side::Sell,
+                ord_type: OrdType::Market,
+                tif: Tif::Fok,
+                price: 0,
+                qty: u64::MAX,
+            },
             Command::Cancel { id: 0xdead_beef },
-            Command::Replace { id: 42, price: 3, qty: 5, post_only: true },
+            Command::Replace {
+                id: 42,
+                price: 3,
+                qty: 5,
+                post_only: true,
+            },
         ];
         for c in &cmds {
             let d = decode_command(&encode_command(c)).unwrap();
@@ -246,13 +311,29 @@ mod tests {
     #[test]
     fn event_roundtrip() {
         let evs = [
-            Event::Accepted { id: 1, side: Side::Sell, price: 2, qty: 3 },
-            Event::Fill { taker: 1, maker: 2, price: 3, qty: 4 },
+            Event::Accepted {
+                id: 1,
+                side: Side::Sell,
+                price: 2,
+                qty: 3,
+            },
+            Event::Fill {
+                taker: 1,
+                maker: 2,
+                price: 3,
+                qty: 4,
+            },
             Event::Rested { id: 1, qty: 2 },
             Event::Expired { id: 1, qty: 2 },
             Event::Cancelled { id: 1, qty: 2 },
-            Event::Reduced { id: 1, from: 9, to: 2 },
-            Event::Rejected { reason: RejectReason::FokUnfillable },
+            Event::Reduced {
+                id: 1,
+                from: 9,
+                to: 2,
+            },
+            Event::Rejected {
+                reason: RejectReason::FokUnfillable,
+            },
         ];
         let mut rec = [0u8; EVT_LEN];
         for e in &evs {

@@ -1,10 +1,8 @@
 //! Lemmas relating a ladder of FIFO price levels (`Seq<Seq<SOrder>>`, indexed
 //! by priority index) to the single priority-ordered sequence of the model.
 
+use crate::{props::*, spec::*, types::*};
 use vstd::prelude::*;
-use crate::types::*;
-use crate::spec::*;
-use crate::props::*;
 
 verus! {
 
@@ -30,6 +28,7 @@ pub proof fn lemma_flat_add(a: Seq<Seq<SOrder>>, b: Seq<Seq<SOrder>>)
 pub proof fn lemma_flat_one(x: Seq<SOrder>)
     ensures flat(seq![x]) =~= x,
 {
+    reveal_with_fuel(flat, 2);
     assert(seq![x].drop_first() =~= Seq::<Seq<SOrder>>::empty());
 }
 

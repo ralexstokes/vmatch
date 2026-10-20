@@ -7,9 +7,9 @@
 //! delivering the right commands in the right order and durably recording them.
 
 pub mod journal;
+#[doc(hidden)]
+pub mod oracle;
 pub mod sequencer;
 pub mod server;
 pub mod snapshot;
 pub mod wire;
-#[doc(hidden)]
-pub mod oracle;

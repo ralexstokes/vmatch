@@ -2,19 +2,7 @@
   description = "Rust development environment";
 
   inputs = {
-    # Track nixpkgs and rust-overlay directly (rather than through rust-env's
-    # lock) so `nix flake update` picks up new Rust releases; Verus pins an
-    # exact rustc that is often newer than the template's lock.
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    rust-overlay = {
-      url = "github:oxalica/rust-overlay";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
-    rust-env = {
-      url = "github:ralexstokes/rust-nix-template";
-      inputs.nixpkgs.follows = "nixpkgs";
-      inputs.rust-overlay.follows = "rust-overlay";
-    };
+    rust-env.url = "github:ralexstokes/rust-nix-template";
   };
 
   outputs =
@@ -26,10 +14,14 @@
       # here or `nix flake check` silently runs without it.
       extraSourceFilter =
         path: type: builtins.match ".*/\\.config/nextest\\.toml" (toString path) != null;
+      # Verus is pinned to one exact rustc, which rust-toolchain.toml selects.
+      extraShellPackages = pkgs: [
+        (pkgs.callPackage ./nix/verus.nix {
+          rustToolchain = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
+        })
+      ];
       # Escape hatches (see the template repo's README):
       #   projectName = "my-project";
-      #   extraShellPackages = pkgs: [ pkgs.mdbook ];
-      #   extraBuildPackages = pkgs: [ pkgs.pkg-config ];
       #   extraChecks = pkgs: { };
       #   extraCiCommands = "cargo run --locked -p hello --example smoke";
     };
