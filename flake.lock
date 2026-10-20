@@ -2,11 +2,11 @@
   "nodes": {
     "crane": {
       "locked": {
-        "lastModified": 1785782307,
-        "narHash": "sha256-MPaRdVkf6zZP5fCPxYCi8Dr4pZzgmXzg8T9nVEbp3Mw=",
+        "lastModified": 1792350552,
+        "narHash": "sha256-292lvpvxTGKryKxh3/3tcIVi85CwYGdl4oOi113Sob8=",
         "owner": "ipetkov",
         "repo": "crane",
-        "rev": "2c71e194474d13de031d729b729c968ddbe3507f",
+        "rev": "e675a36b7377bebe41d548388a2501cbb16d380d",
         "type": "github"
       },
       "original": {
@@ -20,11 +20,11 @@
         "systems": "systems"
       },
       "locked": {
-        "lastModified": 1731533236,
-        "narHash": "sha256-l0KFg5HjrsfsO/JpG+r7fRrqm12kzFHyUHqHCVpMMbI=",
+        "lastModified": 1791914995,
+        "narHash": "sha256-Zf/xfQEAasnwnmEfHqW/4hjDE/s44yn2hD4RuVIZRjA=",
         "owner": "numtide",
         "repo": "flake-utils",
-        "rev": "11707dc2f618dd54ca8739b309ec4fc024de578b",
+        "rev": "b7a79d3fea1e214f6d668d521cecec0c01e26544",
         "type": "github"
       },
       "original": {
@@ -51,28 +51,22 @@
     },
     "root": {
       "inputs": {
-        "nixpkgs": "nixpkgs",
-        "rust-env": "rust-env",
-        "rust-overlay": "rust-overlay"
+        "rust-env": "rust-env"
       }
     },
     "rust-env": {
       "inputs": {
         "crane": "crane",
         "flake-utils": "flake-utils",
-        "nixpkgs": [
-          "nixpkgs"
-        ],
-        "rust-overlay": [
-          "rust-overlay"
-        ]
+        "nixpkgs": "nixpkgs",
+        "rust-overlay": "rust-overlay"
       },
       "locked": {
-        "lastModified": 1786473420,
-        "narHash": "sha256-9WIbT6F5Rgn4mXEURbKM3HBlxH20mWueLALrksNSTrc=",
+        "lastModified": 1792526678,
+        "narHash": "sha256-bNrQp9LB1nIkLh6ho3GP0xpltH3GK+3dbg497xznQRE=",
         "owner": "ralexstokes",
         "repo": "rust-nix-template",
-        "rev": "b0c7bcc1dcad6126d3a055bcfd8d07058417e576",
+        "rev": "41f64bb2a46b22234d14b5649bf495c2ce351a32",
         "type": "github"
       },
       "original": {
@@ -84,6 +78,7 @@
     "rust-overlay": {
       "inputs": {
         "nixpkgs": [
+          "rust-env",
           "nixpkgs"
         ]
       },
