@@ -5,7 +5,7 @@
 
 use hdrhistogram::Histogram;
 use rand::rngs::SmallRng;
-use rand::{Rng, SeedableRng};
+use rand::{RngExt, SeedableRng};
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::time::Instant;
@@ -23,15 +23,15 @@ fn main() {
     let mut hist = Histogram::<u64>::new_with_bounds(1, 1_000_000_000, 3).unwrap();
     let t0 = Instant::now();
     for _ in 0..n {
-        let side = if rng.gen_bool(0.5) { Side::Buy } else { Side::Sell };
-        let cmd = if live.len() > 1000 && rng.gen_bool(0.4) {
-            Command::Cancel { id: live.swap_remove(rng.gen_range(0..live.len())) }
+        let side = if rng.random_bool(0.5) { Side::Buy } else { Side::Sell };
+        let cmd = if live.len() > 1000 && rng.random_bool(0.4) {
+            Command::Cancel { id: live.swap_remove(rng.random_range(0..live.len())) }
         } else {
             let p = 32_768 + match side {
-                Side::Buy => -rng.gen_range(-2..40),
-                Side::Sell => rng.gen_range(-2..40),
+                Side::Buy => -rng.random_range(-2..40),
+                Side::Sell => rng.random_range(-2..40),
             };
-            Command::New { side, ord_type: OrdType::Limit, tif: Tif::Gtc, price: p as u32, qty: rng.gen_range(1..100) }
+            Command::New { side, ord_type: OrdType::Limit, tif: Tif::Gtc, price: p as u32, qty: rng.random_range(1..100) }
         };
         let st = Instant::now();
         s.write_all(&encode_command(&cmd)).unwrap();
