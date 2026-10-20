@@ -2,21 +2,18 @@
 //! `spec::step`, every theorem here is a theorem about the engine.
 //!
 //! Headline results (all for any state satisfying `inv`):
-//! * `theorem_inv`            — every command preserves the invariant: both
-//!                              sides strictly sorted by price-time priority,
-//!                              ids unique, quantities in range, book never
-//!                              crossed (best bid < best ask).
-//! * `theorem_ledger`         — quantity is conserved: resting quantity changes
-//!                              by exactly what the events report.
-//! * `theorem_new_order`      — a new order fills strictly against the front
-//!                              of the opposite book (price-time priority),
-//!                              every fill is at the maker's price and within
-//!                              the taker's limit, taker quantity is fully
-//!                              accounted for, FOK is all-or-nothing and
-//!                              post-only never takes liquidity.
-//! * `theorem_reject_noop`    — a rejected command changes nothing.
-//! * `theorem_replay_compose` — replay is compositional, so snapshot + log
-//!                              suffix recovery equals full replay.
+//! * `theorem_inv`: every command preserves the invariant: both sides
+//!   strictly sorted by price-time priority, ids unique, quantities in range,
+//!   book never crossed (best bid < best ask).
+//! * `theorem_ledger`: quantity is conserved: resting quantity changes by
+//!   exactly what the events report.
+//! * `theorem_new_order`: a new order fills strictly against the front of the
+//!   opposite book (price-time priority), every fill is at the maker's price
+//!   and within the taker's limit, taker quantity is fully accounted for, FOK
+//!   is all-or-nothing and post-only never takes liquidity.
+//! * `theorem_reject_noop`: a rejected command changes nothing.
+//! * `theorem_replay_compose`: replay is compositional, so snapshot + log
+//!   suffix recovery equals full replay.
 
 use crate::{spec::*, types::*};
 use vstd::prelude::*;

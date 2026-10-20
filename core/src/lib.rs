@@ -15,6 +15,19 @@
     unused_variables,
     dead_code
 )]
+// Verus idioms that clippy flags: vstd's specs are stated over `Vec` (not
+// slices), proof-carrying helpers take every ghost/exec component explicitly,
+// and loops are written in the shapes the proofs were done against. Changing
+// these for style would mean re-verifying, so allow them here.
+#![allow(
+    clippy::assign_op_pattern,
+    clippy::collapsible_match,
+    clippy::len_zero,
+    clippy::manual_range_contains,
+    clippy::match_like_matches_macro,
+    clippy::ptr_arg,
+    clippy::too_many_arguments
+)]
 
 extern crate alloc;
 
