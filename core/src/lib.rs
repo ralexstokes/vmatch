@@ -8,16 +8,22 @@
 //! * `engine` — the engine, proven to refine `spec::step`.
 #![no_std]
 #![forbid(unsafe_code)]
-#![allow(unused_parens, unused_imports, non_snake_case, unused_variables, dead_code)]
+#![allow(
+    unused_parens,
+    unused_imports,
+    non_snake_case,
+    unused_variables,
+    dead_code
+)]
 
 extern crate alloc;
 
-pub mod types;
-pub mod spec;
-pub mod props;
-pub mod flat;
 pub mod arena;
 pub mod engine;
+pub mod flat;
+pub mod props;
+pub mod spec;
+pub mod types;
 
 pub use engine::Engine;
 pub use types::*;

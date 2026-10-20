@@ -1,6 +1,5 @@
 #![allow(dead_code)]
-use rand::rngs::SmallRng;
-use rand::{RngExt, SeedableRng};
+use rand::{rngs::SmallRng, RngExt, SeedableRng};
 use vmatch_core::{Command, Event, OrdType, Side, Tif};
 
 /// Random command generator that mostly targets live orders, with a mix of
@@ -17,7 +16,15 @@ pub struct Gen {
 
 impl Gen {
     pub fn new(seed: u64, ticks: u32, max_qty: u64) -> Self {
-        Gen { rng: SmallRng::seed_from_u64(seed), ticks, live: vec![], info: Default::default(), pending_price: Default::default(), mid: ticks / 2, max_qty }
+        Gen {
+            rng: SmallRng::seed_from_u64(seed),
+            ticks,
+            live: vec![],
+            info: Default::default(),
+            pending_price: Default::default(),
+            mid: ticks / 2,
+            max_qty,
+        }
     }
 
     pub fn observe(&mut self, events: &[Event]) {
@@ -89,7 +96,11 @@ impl Gen {
 
     pub fn next(&mut self) -> Command {
         let r = self.rng.random_range(0..100);
-        let side = if self.rng.random_bool(0.5) { Side::Buy } else { Side::Sell };
+        let side = if self.rng.random_bool(0.5) {
+            Side::Buy
+        } else {
+            Side::Sell
+        };
         if r < 55 {
             let (ord_type, tif) = match self.rng.random_range(0..100) {
                 0..=59 => (OrdType::Limit, Tif::Gtc),
@@ -98,9 +109,22 @@ impl Gen {
                 78..=87 => (OrdType::Limit, Tif::PostOnly),
                 88..=93 => (OrdType::Market, Tif::Ioc),
                 94..=97 => (OrdType::Market, Tif::Fok),
-                _ => (OrdType::Market, if self.rng.random_bool(0.5) { Tif::Gtc } else { Tif::PostOnly }),
+                _ => (
+                    OrdType::Market,
+                    if self.rng.random_bool(0.5) {
+                        Tif::Gtc
+                    } else {
+                        Tif::PostOnly
+                    },
+                ),
             };
-            Command::New { side, ord_type, tif, price: self.price(), qty: self.qty() }
+            Command::New {
+                side,
+                ord_type,
+                tif,
+                price: self.price(),
+                qty: self.qty(),
+            }
         } else if r < 80 {
             let id = self.pick_id();
             Command::Cancel { id }
@@ -109,9 +133,19 @@ impl Gen {
             if let (true, Some(&(p, q))) = (self.rng.random_bool(0.4), self.info.get(&id)) {
                 // in-place reduction (keeps priority), sometimes to the same qty
                 let nq = self.rng.random_range(1..=q);
-                return Command::Replace { id, price: p, qty: nq, post_only: false };
+                return Command::Replace {
+                    id,
+                    price: p,
+                    qty: nq,
+                    post_only: false,
+                };
             }
-            Command::Replace { id, price: self.price(), qty: self.qty(), post_only: self.rng.random_ratio(1, 5) }
+            Command::Replace {
+                id,
+                price: self.price(),
+                qty: self.qty(),
+                post_only: self.rng.random_ratio(1, 5),
+            }
         }
     }
 

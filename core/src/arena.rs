@@ -2,11 +2,9 @@
 //! FIFO lists (one per price level per side) and a singly linked free stack.
 //! Every operation is O(1) and allocation-free.
 
-use vstd::prelude::*;
+use crate::{flat::*, spec::*, types::*};
 use alloc::vec::Vec;
-use crate::types::*;
-use crate::spec::*;
-use crate::flat::*;
+use vstd::prelude::*;
 
 verus! {
 

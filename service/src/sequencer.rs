@@ -1,10 +1,11 @@
 //! The sequencer: owns the engine, assigns command sequence numbers, journals
 //! commands before releasing responses, and recovers by replay.
 
-use crate::journal::{self, Header, SyncMode};
-use crate::snapshot::Snapshot;
-use std::io;
-use std::path::Path;
+use crate::{
+    journal::{self, Header, SyncMode},
+    snapshot::Snapshot,
+};
+use std::{io, path::Path};
 use vmatch_core::{Command, Engine, Event};
 
 pub struct Sequencer {
@@ -42,19 +43,38 @@ impl Sequencer {
     /// An engine with no journal (tests, benchmarks).
     pub fn in_memory(ticks: u32, cap: u32) -> Result<Self, OpenError> {
         let engine = Engine::try_new(ticks, cap).ok_or(OpenError::BadConfig)?;
-        Ok(Sequencer { engine, journal: None, events: Vec::with_capacity(1024), seq: 0, cap, poisoned: false })
+        Ok(Sequencer {
+            engine,
+            journal: None,
+            events: Vec::with_capacity(1024),
+            seq: 0,
+            cap,
+            poisoned: false,
+        })
     }
 
     /// Create a fresh journal at `path`.
     pub fn create(path: &Path, ticks: u32, cap: u32, sync: SyncMode) -> Result<Self, OpenError> {
         let engine = Engine::try_new(ticks, cap).ok_or(OpenError::BadConfig)?;
         let w = journal::Writer::create(path, Header { ticks, cap }, sync)?;
-        Ok(Sequencer { engine, journal: Some(w), events: Vec::with_capacity(1024), seq: 0, cap, poisoned: false })
+        Ok(Sequencer {
+            engine,
+            journal: Some(w),
+            events: Vec::with_capacity(1024),
+            seq: 0,
+            cap,
+            poisoned: false,
+        })
     }
 
     /// Recover from an existing journal by deterministic replay. Returns the
     /// sequencer and the number of commands replayed.
-    pub fn recover(path: &Path, ticks: u32, cap: u32, sync: SyncMode) -> Result<(Self, u64), OpenError> {
+    pub fn recover(
+        path: &Path,
+        ticks: u32,
+        cap: u32,
+        sync: SyncMode,
+    ) -> Result<(Self, u64), OpenError> {
         let mut engine = Engine::try_new(ticks, cap).ok_or(OpenError::BadConfig)?;
         let (w, cmds) = journal::Writer::open(path, Header { ticks, cap }, sync)?;
         let mut events = Vec::with_capacity(1024);
@@ -63,13 +83,29 @@ impl Sequencer {
             engine.step(*c, &mut events);
         }
         let n = cmds.len() as u64;
-        Ok((Sequencer { engine, journal: Some(w), events, seq: n, cap, poisoned: false }, n))
+        Ok((
+            Sequencer {
+                engine,
+                journal: Some(w),
+                events,
+                seq: n,
+                cap,
+                poisoned: false,
+            },
+            n,
+        ))
     }
 
     /// Recover from the snapshot at `snap` (if present and valid) plus the
     /// journal suffix after it; falls back to full replay otherwise. Returns
     /// the sequencer, the commands replayed, and whether a snapshot was used.
-    pub fn recover_with_snapshot(journal_path: &Path, snap: &Path, ticks: u32, cap: u32, sync: SyncMode) -> Result<(Self, u64, bool), OpenError> {
+    pub fn recover_with_snapshot(
+        journal_path: &Path,
+        snap: &Path,
+        ticks: u32,
+        cap: u32,
+        sync: SyncMode,
+    ) -> Result<(Self, u64, bool), OpenError> {
         let (w, cmds) = journal::Writer::open(journal_path, Header { ticks, cap }, sync)?;
         let restored = Snapshot::read(snap)
             .filter(|s| s.ticks == ticks && s.cap == cap && s.applied <= cmds.len() as u64)
@@ -85,7 +121,18 @@ impl Sequencer {
             engine.step(*c, &mut events);
         }
         let n = cmds.len() as u64;
-        Ok((Sequencer { engine, journal: Some(w), events, seq: n, cap, poisoned: false }, n - start, used))
+        Ok((
+            Sequencer {
+                engine,
+                journal: Some(w),
+                events,
+                seq: n,
+                cap,
+                poisoned: false,
+            },
+            n - start,
+            used,
+        ))
     }
 
     /// Write a snapshot of the current state (after everything applied so far).
@@ -118,9 +165,15 @@ impl Sequencer {
     /// command and hand its events to `on_result`. If the journal write
     /// fails nothing is applied and the sequencer is poisoned: restart and
     /// recover from the journal.
-    pub fn process_batch<F: FnMut(u64, &Command, &[Event])>(&mut self, cmds: &[Command], mut on_result: F) -> io::Result<()> {
+    pub fn process_batch<F: FnMut(u64, &Command, &[Event])>(
+        &mut self,
+        cmds: &[Command],
+        mut on_result: F,
+    ) -> io::Result<()> {
         if self.poisoned {
-            return Err(io::Error::other("sequencer poisoned by an earlier journal failure"));
+            return Err(io::Error::other(
+                "sequencer poisoned by an earlier journal failure",
+            ));
         }
         if let Some(j) = self.journal.as_mut() {
             for c in cmds {

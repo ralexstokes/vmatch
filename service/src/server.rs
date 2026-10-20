@@ -6,15 +6,19 @@
 //! batch (header + events) per command, in order. A malformed frame closes
 //! the connection. The feed port streams every batch for every command.
 
-use crate::journal::SyncMode;
-use crate::sequencer::Sequencer;
-use crate::wire::{decode_command, encode_batch, CMD_LEN};
-use std::collections::HashMap;
-use std::io::{self, BufReader, Read, Write};
-use std::net::{TcpListener, TcpStream};
-use std::path::PathBuf;
-use std::sync::mpsc::{self, Receiver, Sender, SyncSender, TrySendError};
-use std::thread;
+use crate::{
+    journal::SyncMode,
+    sequencer::Sequencer,
+    wire::{decode_command, encode_batch, CMD_LEN},
+};
+use std::{
+    collections::HashMap,
+    io::{self, BufReader, Read, Write},
+    net::{TcpListener, TcpStream},
+    path::PathBuf,
+    sync::mpsc::{self, Receiver, Sender, SyncSender, TrySendError},
+    thread,
+};
 use vmatch_core::Command;
 
 pub struct Config {
@@ -52,8 +56,11 @@ pub fn start(cfg: Config) -> io::Result<Running> {
             eprintln!("vmatchd: recovered {n} commands from {}", p.display());
             s
         }
-        Some(p) => Sequencer::create(p, cfg.ticks, cfg.cap, cfg.sync).map_err(|e| io::Error::other(e.to_string()))?,
-        None => Sequencer::in_memory(cfg.ticks, cfg.cap).map_err(|e| io::Error::other(e.to_string()))?,
+        Some(p) => Sequencer::create(p, cfg.ticks, cfg.cap, cfg.sync)
+            .map_err(|e| io::Error::other(e.to_string()))?,
+        None => {
+            Sequencer::in_memory(cfg.ticks, cfg.cap).map_err(|e| io::Error::other(e.to_string()))?
+        }
     };
 
     let (tx, rx) = mpsc::sync_channel::<Msg>(cfg.inbound_queue);
@@ -62,19 +69,29 @@ pub fn start(cfg: Config) -> io::Result<Running> {
     let order_addr = order_listener.local_addr()?;
     {
         let tx = tx.clone();
-        thread::Builder::new().name("accept-orders".into()).spawn(move || accept_orders(order_listener, tx))?;
+        thread::Builder::new()
+            .name("accept-orders".into())
+            .spawn(move || accept_orders(order_listener, tx))?;
     }
     let mut feed_addr = None;
     if let Some(addr) = &cfg.feed_addr {
         let feed_listener = TcpListener::bind(addr)?;
         feed_addr = Some(feed_listener.local_addr()?);
         let tx = tx.clone();
-        thread::Builder::new().name("accept-feed".into()).spawn(move || accept_feed(feed_listener, tx))?;
+        thread::Builder::new()
+            .name("accept-feed".into())
+            .spawn(move || accept_feed(feed_listener, tx))?;
     }
     drop(tx);
     let max_batch = cfg.max_batch;
-    let engine = thread::Builder::new().name("engine".into()).spawn(move || engine_loop(&mut seqr, rx, max_batch))?;
-    Ok(Running { order_addr, feed_addr, engine })
+    let engine = thread::Builder::new()
+        .name("engine".into())
+        .spawn(move || engine_loop(&mut seqr, rx, max_batch))?;
+    Ok(Running {
+        order_addr,
+        feed_addr,
+        engine,
+    })
 }
 
 /// Start and run until the engine thread stops.
@@ -84,7 +101,9 @@ pub fn run(cfg: Config) -> io::Result<()> {
     if let Some(a) = r.feed_addr {
         eprintln!("vmatchd: feed on {a}");
     }
-    r.engine.join().map_err(|_| io::Error::other("engine thread panicked"))?
+    r.engine
+        .join()
+        .map_err(|_| io::Error::other("engine thread panicked"))?
 }
 
 fn accept_orders(l: TcpListener, tx: SyncSender<Msg>) {
@@ -99,9 +118,13 @@ fn accept_orders(l: TcpListener, tx: SyncSender<Msg>) {
             return;
         }
         let Ok(ws) = stream.try_clone() else { continue };
-        let _ = thread::Builder::new().name(format!("conn-{id}-w")).spawn(move || writer(ws, wrx));
+        let _ = thread::Builder::new()
+            .name(format!("conn-{id}-w"))
+            .spawn(move || writer(ws, wrx));
         let tx2 = tx.clone();
-        let _ = thread::Builder::new().name(format!("conn-{id}-r")).spawn(move || reader(id, stream, tx2));
+        let _ = thread::Builder::new()
+            .name(format!("conn-{id}-r"))
+            .spawn(move || reader(id, stream, tx2));
     }
 }
 
@@ -161,7 +184,10 @@ fn engine_loop(seqr: &mut Sequencer, rx: Receiver<Msg>, max_batch: usize) -> io:
     let mut per_conn: HashMap<u64, Vec<u8>> = HashMap::new();
     let mut feed: Vec<u8> = Vec::with_capacity(1 << 16);
 
-    let handle = |m: Msg, batch: &mut Vec<(u64, Command)>, conns: &mut HashMap<u64, Sender<Vec<u8>>>, subs: &mut Vec<_>| match m {
+    let handle = |m: Msg,
+                  batch: &mut Vec<(u64, Command)>,
+                  conns: &mut HashMap<u64, Sender<Vec<u8>>>,
+                  subs: &mut Vec<_>| match m {
         Msg::Connect(id, s) => {
             conns.insert(id, s);
         }

@@ -4,8 +4,7 @@
 //!   cargo run --release -p vmatch-service --example bench -- [commands] [resting]
 
 use hdrhistogram::Histogram;
-use rand::rngs::SmallRng;
-use rand::{RngExt, SeedableRng};
+use rand::{rngs::SmallRng, RngExt, SeedableRng};
 use std::time::Instant;
 use vmatch_core::{Command, Engine, Event, OrdType, Side, Tif};
 
@@ -19,7 +18,11 @@ struct Load {
 impl Load {
     fn price(&mut self, side: Side, aggressive: bool) -> u32 {
         // passive orders 1..40 ticks behind mid; aggressive ones cross by 0..3
-        let d = if aggressive { -self.rng.random_range(0..4) } else { self.rng.random_range(1..40) };
+        let d = if aggressive {
+            -self.rng.random_range(0..4)
+        } else {
+            self.rng.random_range(1..40)
+        };
         let p = match side {
             Side::Buy => self.mid - d,
             Side::Sell => self.mid + d,
@@ -29,17 +32,38 @@ impl Load {
 
     fn next(&mut self) -> Command {
         if self.rng.random_ratio(1, 1000) {
-            self.mid = (self.mid + self.rng.random_range(-2..=2)).clamp(100, self.ticks as i64 - 100);
+            self.mid =
+                (self.mid + self.rng.random_range(-2..=2)).clamp(100, self.ticks as i64 - 100);
         }
-        let side = if self.rng.random_bool(0.5) { Side::Buy } else { Side::Sell };
+        let side = if self.rng.random_bool(0.5) {
+            Side::Buy
+        } else {
+            Side::Sell
+        };
         let r = self.rng.random_range(0..100);
         if r < 45 || self.live.is_empty() {
             let p = self.price(side, false);
-            Command::New { side, ord_type: OrdType::Limit, tif: Tif::Gtc, price: p, qty: self.rng.random_range(1..100) }
+            Command::New {
+                side,
+                ord_type: OrdType::Limit,
+                tif: Tif::Gtc,
+                price: p,
+                qty: self.rng.random_range(1..100),
+            }
         } else if r < 55 {
             let p = self.price(side, true);
-            let tif = if self.rng.random_bool(0.7) { Tif::Ioc } else { Tif::Gtc };
-            Command::New { side, ord_type: OrdType::Limit, tif, price: p, qty: self.rng.random_range(1..300) }
+            let tif = if self.rng.random_bool(0.7) {
+                Tif::Ioc
+            } else {
+                Tif::Gtc
+            };
+            Command::New {
+                side,
+                ord_type: OrdType::Limit,
+                tif,
+                price: p,
+                qty: self.rng.random_range(1..300),
+            }
         } else if r < 85 {
             let i = self.rng.random_range(0..self.live.len());
             let (id, _) = self.live.swap_remove(i);
@@ -47,7 +71,12 @@ impl Load {
         } else {
             let i = self.rng.random_range(0..self.live.len());
             let (id, p) = self.live.swap_remove(i);
-            Command::Replace { id, price: p, qty: self.rng.random_range(1..100), post_only: false }
+            Command::Replace {
+                id,
+                price: p,
+                qty: self.rng.random_range(1..100),
+                post_only: false,
+            }
         }
     }
 
@@ -69,15 +98,30 @@ fn main() {
     let ticks = 1 << 16;
     let cap = 1 << 22;
     let mut eng = Engine::try_new(ticks, cap).unwrap();
-    let mut load = Load { rng: SmallRng::seed_from_u64(1), live: Vec::new(), mid: ticks as i64 / 2, ticks };
+    let mut load = Load {
+        rng: SmallRng::seed_from_u64(1),
+        live: Vec::new(),
+        mid: ticks as i64 / 2,
+        ticks,
+    };
     let mut ev: Vec<Event> = Vec::with_capacity(4096);
     let mut lp = 0;
 
     // warm up: build a deep book
     while load.live.len() < resting {
-        let side = if load.rng.random_bool(0.5) { Side::Buy } else { Side::Sell };
+        let side = if load.rng.random_bool(0.5) {
+            Side::Buy
+        } else {
+            Side::Sell
+        };
         let p = load.price(side, false);
-        let c = Command::New { side, ord_type: OrdType::Limit, tif: Tif::Gtc, price: p, qty: load.rng.random_range(1..100) };
+        let c = Command::New {
+            side,
+            ord_type: OrdType::Limit,
+            tif: Tif::Gtc,
+            price: p,
+            qty: load.rng.random_range(1..100),
+        };
         ev.clear();
         eng.step(c, &mut ev);
         load.observe(&ev, &mut lp);
@@ -95,13 +139,21 @@ fn main() {
         eng.step(c, &mut ev);
         let d = s.elapsed().as_nanos() as u64;
         hist.record(d.max(1)).unwrap();
-        fills += ev.iter().filter(|e| matches!(e, Event::Fill { .. })).count();
+        fills += ev
+            .iter()
+            .filter(|e| matches!(e, Event::Fill { .. }))
+            .count();
         load.observe(&ev, &mut lp);
     }
     let el = t0.elapsed();
 
     // throughput without per-op timers
-    let mut load2 = Load { rng: SmallRng::seed_from_u64(2), live: load.live.clone(), mid: load.mid, ticks };
+    let mut load2 = Load {
+        rng: SmallRng::seed_from_u64(2),
+        live: load.live.clone(),
+        mid: load.mid,
+        ticks,
+    };
     let t1 = Instant::now();
     for _ in 0..n {
         let c = load2.next();
@@ -114,11 +166,18 @@ fn main() {
     println!("commands            {n}");
     println!("resting at start    {resting}");
     println!("fills               {fills}");
-    println!("throughput          {:.2} M cmd/s (incl. load generator)", n as f64 / el2.as_secs_f64() / 1e6);
+    println!(
+        "throughput          {:.2} M cmd/s (incl. load generator)",
+        n as f64 / el2.as_secs_f64() / 1e6
+    );
     println!("latency per step()  (timer overhead included, ~20ns)");
     for q in [0.5, 0.9, 0.99, 0.999, 0.9999] {
         println!("  p{:<7} {:>8} ns", q * 100.0, hist.value_at_quantile(q));
     }
     println!("  max      {:>8} ns", hist.max());
-    println!("  mean     {:>8.0} ns   (loop wall {:.2}s)", hist.mean(), el.as_secs_f64());
+    println!(
+        "  mean     {:>8.0} ns   (loop wall {:.2}s)",
+        hist.mean(),
+        el.as_secs_f64()
+    );
 }

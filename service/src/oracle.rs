@@ -39,7 +39,13 @@ fn opp(s: Side) -> Side {
 
 impl Model {
     pub fn new(ticks: u32, cap: u32) -> Self {
-        Model { ticks, bids: vec![], asks: vec![], free: (0..cap).collect(), next_seq: 0 }
+        Model {
+            ticks,
+            bids: vec![],
+            asks: vec![],
+            free: (0..cap).collect(),
+            next_seq: 0,
+        }
     }
 
     fn book(&mut self, s: Side) -> &mut Vec<Order> {
@@ -59,13 +65,22 @@ impl Model {
 
     fn fillable(&mut self, ms: Side, lim: i64) -> u128 {
         let t = self.ticks;
-        self.book(ms).iter().take_while(|o| idx(t, ms, o.price) <= lim).map(|o| o.qty as u128).sum()
+        self.book(ms)
+            .iter()
+            .take_while(|o| idx(t, ms, o.price) <= lim)
+            .map(|o| o.qty as u128)
+            .sum()
     }
 
     fn submit(&mut self, side: Side, price: u32, qty: u64, tif: Tif, out: &mut Vec<Event>) {
         let slot = self.free.pop_front().unwrap();
         let id = self.next_seq * SLOT_SPACE + slot as u64;
-        out.push(Event::Accepted { id, side, price, qty });
+        out.push(Event::Accepted {
+            id,
+            side,
+            price,
+            qty,
+        });
         let ms = opp(side);
         let lim = idx(self.ticks, ms, price);
         let mut rem = qty;
@@ -79,12 +94,22 @@ impl Model {
                 _ => break,
             };
             if m.qty <= rem {
-                out.push(Event::Fill { taker: id, maker: m.id, price: m.price, qty: m.qty });
+                out.push(Event::Fill {
+                    taker: id,
+                    maker: m.id,
+                    price: m.price,
+                    qty: m.qty,
+                });
                 rem -= m.qty;
                 self.book(ms).remove(0);
                 self.free.push_front((m.id % SLOT_SPACE) as u32);
             } else {
-                out.push(Event::Fill { taker: id, maker: m.id, price: m.price, qty: rem });
+                out.push(Event::Fill {
+                    taker: id,
+                    maker: m.id,
+                    price: m.price,
+                    qty: rem,
+                });
                 self.book(ms)[0].qty = m.qty - rem;
                 rem = 0;
             }
@@ -94,8 +119,18 @@ impl Model {
             let t = self.ticks;
             let i = idx(t, side, price);
             let own = self.book(side);
-            let pos = own.iter().take_while(|o| idx(t, side, o.price) <= i).count();
-            own.insert(pos, Order { id, price, qty: rem });
+            let pos = own
+                .iter()
+                .take_while(|o| idx(t, side, o.price) <= i)
+                .count();
+            own.insert(
+                pos,
+                Order {
+                    id,
+                    price,
+                    qty: rem,
+                },
+            );
             out.push(Event::Rested { id, qty: rem });
         } else {
             if rem > 0 {
@@ -110,7 +145,10 @@ impl Model {
         if let Some(j) = self.bids.iter().position(|o| o.id == id) {
             return Some((Side::Buy, j));
         }
-        self.asks.iter().position(|o| o.id == id).map(|j| (Side::Sell, j))
+        self.asks
+            .iter()
+            .position(|o| o.id == id)
+            .map(|j| (Side::Sell, j))
     }
 
     fn remove_at(&mut self, side: Side, j: usize) -> Order {
@@ -122,7 +160,13 @@ impl Model {
     pub fn step(&mut self, c: Command, out: &mut Vec<Event>) {
         let rej = |out: &mut Vec<Event>, r| out.push(Event::Rejected { reason: r });
         match c {
-            Command::New { side, ord_type, tif, price, qty } => {
+            Command::New {
+                side,
+                ord_type,
+                tif,
+                price,
+                qty,
+            } => {
                 let market = matches!(ord_type, OrdType::Market);
                 let px = if market {
                     match side {
@@ -145,7 +189,9 @@ impl Model {
                     rej(out, RejectReason::BookFull)
                 } else if matches!(tif, Tif::PostOnly) && self.would_cross(side, px) {
                     rej(out, RejectReason::WouldCross)
-                } else if matches!(tif, Tif::Fok) && self.fillable(ms, idx(self.ticks, ms, px)) < qty as u128 {
+                } else if matches!(tif, Tif::Fok)
+                    && self.fillable(ms, idx(self.ticks, ms, px)) < qty as u128
+                {
                     rej(out, RejectReason::FokUnfillable)
                 } else {
                     self.submit(side, px, qty, tif, out)
@@ -158,7 +204,12 @@ impl Model {
                     out.push(Event::Cancelled { id, qty: o.qty });
                 }
             },
-            Command::Replace { id, price, qty, post_only } => {
+            Command::Replace {
+                id,
+                price,
+                qty,
+                post_only,
+            } => {
                 if price >= self.ticks {
                     return rej(out, RejectReason::InvalidPrice);
                 }
@@ -171,7 +222,11 @@ impl Model {
                 let o = self.book(side)[j];
                 if price == o.price && qty <= o.qty {
                     self.book(side)[j].qty = qty;
-                    out.push(Event::Reduced { id, from: o.qty, to: qty });
+                    out.push(Event::Reduced {
+                        id,
+                        from: o.qty,
+                        to: qty,
+                    });
                 } else if self.next_seq > MAX_SEQ {
                     rej(out, RejectReason::SeqExhausted)
                 } else if post_only && self.would_cross(side, price) {

@@ -4,10 +4,7 @@
 mod common;
 
 use vmatch_core::{Command, Engine, Event, SOrder};
-use vmatch_service::journal::SyncMode;
-use vmatch_service::sequencer::Sequencer;
-use vmatch_service::snapshot::Snapshot;
-use vmatch_service::wire::event_eq;
+use vmatch_service::{journal::SyncMode, sequencer::Sequencer, snapshot::Snapshot, wire::event_eq};
 
 fn tmp(name: &str) -> std::path::PathBuf {
     let d = std::env::temp_dir().join(format!("vmatch-snap-{}-{name}", std::process::id()));
@@ -62,11 +59,15 @@ fn export_import_roundtrip_at_every_point() {
                 let mut r = snap.restore().expect("valid snapshot rejected");
                 let end = (i + 300).min(cmds.len());
                 let want: Vec<Event> = per_cmd[i..end].iter().flatten().copied().collect();
-                assert!(same(&run_all(&mut r, &cmds[i..end]), &want), "seed {seed} at {i}");
+                assert!(
+                    same(&run_all(&mut r, &cmds[i..end]), &want),
+                    "seed {seed} at {i}"
+                );
                 // export of the restored engine is identical to the snapshot
                 let r2 = snap.restore().unwrap();
                 let again = Snapshot::capture(&r2, cap, i as u64);
-                let key = |v: &[SOrder]| v.iter().map(|o| (o.id, o.price, o.qty)).collect::<Vec<_>>();
+                let key =
+                    |v: &[SOrder]| v.iter().map(|o| (o.id, o.price, o.qty)).collect::<Vec<_>>();
                 assert_eq!(key(&again.bids), key(&snap.bids));
                 assert_eq!(key(&again.asks), key(&snap.asks));
                 assert_eq!(again.free, snap.free);
@@ -100,11 +101,13 @@ fn snapshot_plus_journal_suffix_equals_full_run() {
             s.process_batch(chunk, |_, _, _| {}).unwrap();
         }
     }
-    let (mut s2, replayed, used) = Sequencer::recover_with_snapshot(&jp, &sp, ticks, cap, SyncMode::NoSync).unwrap();
+    let (mut s2, replayed, used) =
+        Sequencer::recover_with_snapshot(&jp, &sp, ticks, cap, SyncMode::NoSync).unwrap();
     assert!(used);
     assert_eq!(replayed, (a.len() - 10_000) as u64);
     let mut got = Vec::new();
-    s2.process_batch(b, |_, _, ev| got.extend_from_slice(ev)).unwrap();
+    s2.process_batch(b, |_, _, ev| got.extend_from_slice(ev))
+        .unwrap();
     assert!(same(&want, &got));
 
     // a corrupted snapshot is ignored and recovery falls back to full replay
@@ -113,7 +116,8 @@ fn snapshot_plus_journal_suffix_equals_full_run() {
     d[mid] ^= 1;
     std::fs::write(&sp, d).unwrap();
     drop(s2);
-    let (_, replayed, used) = Sequencer::recover_with_snapshot(&jp, &sp, ticks, cap, SyncMode::NoSync).unwrap();
+    let (_, replayed, used) =
+        Sequencer::recover_with_snapshot(&jp, &sp, ticks, cap, SyncMode::NoSync).unwrap();
     assert!(!used);
     assert_eq!(replayed, cmds.len() as u64);
     let _ = std::fs::remove_file(&jp);
@@ -123,10 +127,21 @@ fn snapshot_plus_journal_suffix_equals_full_run() {
 #[test]
 fn importer_rejects_invalid_states() {
     let (ticks, cap) = (16, 8);
-    let ok = |b: &[SOrder], a: &[SOrder], f: &[u32], ns: u64| Engine::import(ticks, cap, &b.to_vec(), &a.to_vec(), &f.to_vec(), ns).is_some();
-    let o = |seq: u64, slot: u64, price: u32, qty: u64| SOrder { id: seq * vmatch_core::SLOT_SPACE + slot, price, qty };
+    let ok = |b: &[SOrder], a: &[SOrder], f: &[u32], ns: u64| {
+        Engine::import(ticks, cap, &b.to_vec(), &a.to_vec(), &f.to_vec(), ns).is_some()
+    };
+    let o = |seq: u64, slot: u64, price: u32, qty: u64| SOrder {
+        id: seq * vmatch_core::SLOT_SPACE + slot,
+        price,
+        qty,
+    };
     // valid
-    assert!(ok(&[o(0, 0, 5, 1), o(1, 1, 4, 1)], &[o(2, 2, 6, 3)], &[3, 4, 5, 6, 7], 3));
+    assert!(ok(
+        &[o(0, 0, 5, 1), o(1, 1, 4, 1)],
+        &[o(2, 2, 6, 3)],
+        &[3, 4, 5, 6, 7],
+        3
+    ));
     // bids out of priority order
     assert!(!ok(&[o(0, 0, 4, 1), o(1, 1, 5, 1)], &[], &[], 3));
     // same price, later order first (time priority violated)
