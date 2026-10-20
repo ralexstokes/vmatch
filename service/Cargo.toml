@@ -1,0 +1,17 @@
+[package]
+name = "vmatch-service"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "Sequencer, write-ahead journal, snapshots and TCP wire protocol around the verified vmatch core (unverified shell)"
+
+[dependencies]
+vmatch-core = { path = "../core" }
+crc32fast = "1"
+
+[dev-dependencies]
+rand = { version = "0.8", features = ["small_rng"] }
+hdrhistogram = "7"
+
+[lints]
+workspace = true

@@ -1,0 +1,5 @@
+[toolchain]
+# Pinned to the Rust version required by the targeted Verus commit (see HANDOFF.md).
+channel = "1.99.1"
+components = ["clippy", "rust-analyzer", "rustfmt"]
+profile = "minimal"

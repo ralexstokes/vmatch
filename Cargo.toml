@@ -1,0 +1,24 @@
+[workspace]
+resolver = "2"
+members = ["core", "service"]
+
+# The flake reads `name` to label Nix derivations.
+[workspace.metadata]
+name = "vmatch"
+
+[workspace.package]
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[workspace.lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(verus_keep_ghost)', 'cfg(verus_keep_ghost_body)', 'cfg(verus_verify_core)', 'cfg(verus_only)'] }
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+debug = 1
+
+[profile.bench]
+inherits = "release"
