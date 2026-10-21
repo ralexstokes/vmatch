@@ -2,7 +2,7 @@
 //! FIFO lists (one per price level per side) and a singly linked free stack.
 //! Every operation is O(1) and allocation-free.
 
-use crate::{flat::*, spec::*, types::*};
+use crate::{bitmap::*, flat::*, spec::*, types::*};
 use alloc::vec::Vec;
 use vstd::prelude::*;
 
@@ -32,6 +32,8 @@ pub struct Ladder {
     pub best: u32,
     /// Ghost: the slots in each level, front (oldest) first.
     pub lists: Ghost<Seq<Seq<u32>>>,
+    /// Which levels are non-empty, for finding the next best level in O(1).
+    pub bits: Bitmap,
 }
 
 // ---------------------------------------------------------------------------
@@ -90,9 +92,15 @@ pub open spec fn best_ok(lad: Ladder, ticks: u32) -> bool {
     &&& lad.best < ticks ==> lad.lists@[lad.best as int].len() > 0
 }
 
+/// Which levels of a ladder are non-empty.
+pub open spec fn nonempty(ls: Seq<Seq<u32>>) -> Seq<bool> {
+    Seq::new(ls.len(), |t: int| ls[t].len() > 0)
+}
+
 pub open spec fn ladder_wf(nodes: Seq<Node>, lad: Ladder, side: Side, ticks: u32) -> bool {
     &&& nodes.len() <= MAX_CAPACITY
     &&& ticks <= MAX_TICKS
+    &&& bitmap_wf(lad.bits, nonempty(lad.lists@))
     &&& lad.levels@.len() == ticks
     &&& lad.lists@.len() == ticks
     &&& forall|t: int| 0 <= t < ticks ==> #[trigger] level_wf(nodes, lad.levels@[t], lad.lists@[t], side, t, ticks)
@@ -295,6 +303,8 @@ pub fn push_back(
     proof {
         lad.lists@ = ls0.update(t as int, l1);
     }
+    lad.bits.set(Ghost(nonempty(ls0)), t);
+    proof { assert(nonempty(lad.lists@) =~= nonempty(ls0).update(t as int, true)); }
     if t < lad.best {
         lad.best = t;
     }
@@ -515,47 +525,22 @@ pub fn unlink(nodes: &mut Vec<Node>, lad: &mut Ladder, side: Side, ticks: u32, t
         if l1.len() > 0 { assert(head == l1[0]); assert(member_ok(nodes@, l1, 0, side, t as int, ticks)); }
         assert(emptied <==> l1.len() == 0);
     }
-    if emptied && lad.best == t {
-        let b = scan(lad, nodes, side, ticks, t + 1);
-        lad.best = b;
-    }
-}
-
-/// First non-empty level at or after `from`, or `ticks`.
-pub fn scan(lad: &Ladder, nodes: &Vec<Node>, side: Side, ticks: u32, from: u32) -> (r: u32)
-    requires
-        nodes@.len() <= MAX_CAPACITY,
-        lad.levels@.len() == ticks,
-        lad.lists@.len() == ticks,
-        forall|t: int| 0 <= t < ticks ==> #[trigger] level_wf(nodes@, lad.levels@[t], lad.lists@[t], side, t, ticks),
-        from <= ticks,
-    ensures
-        from <= r <= ticks,
-        forall|t: int| from <= t < r ==> (#[trigger] lad.lists@[t]).len() == 0,
-        r < ticks ==> lad.lists@[r as int].len() > 0,
-{
-    let mut t = from;
-    while t < ticks
-        invariant
-            from <= t <= ticks,
-            lad.levels@.len() == ticks,
-            lad.lists@.len() == ticks,
-            forall|tt: int| 0 <= tt < ticks ==> #[trigger] level_wf(nodes@, lad.levels@[tt], lad.lists@[tt], side, tt, ticks),
-            forall|tt: int| from <= tt < t ==> (#[trigger] lad.lists@[tt]).len() == 0,
-        decreases ticks - t,
-    {
-        proof { assert(level_wf(nodes@, lad.levels@[t as int], lad.lists@[t as int], side, t as int, ticks)); }
-        if lad.levels[t as usize].head != NIL {
-            return t;
-        }
-        proof {
-            if lad.lists@[t as int].len() > 0 {
-                assert(member_ok(nodes@, lad.lists@[t as int], 0, side, t as int, ticks));
+    if emptied {
+        lad.bits.clear(Ghost(nonempty(ls0)), t);
+        proof { assert(nonempty(lad.lists@) =~= nonempty(ls0).update(t as int, false)); }
+        if lad.best == t {
+            let b = lad.bits.next(Ghost(nonempty(lad.lists@)), ticks, t + 1);
+            proof {
+                assert forall|tt: int| t + 1 <= tt < b implies (#[trigger] lad.lists@[tt]).len() == 0 by {
+                    assert(!nonempty(lad.lists@)[tt]);
+                }
+                if b < ticks { assert(nonempty(lad.lists@)[b as int]); }
             }
+            lad.best = b;
         }
-        t = t + 1;
+    } else {
+        proof { assert(nonempty(lad.lists@) =~= nonempty(ls0)); }
     }
-    t
 }
 
 /// Overwrite the quantity of the member at position `i` of level `t`.

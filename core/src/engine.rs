@@ -3,7 +3,7 @@
 //! includes the model invariant `spec::inv`. Together with the theorems in
 //! `props.rs` this gives the engine's guarantees.
 
-use crate::{arena::*, flat::*, props::*, spec::*, types::*};
+use crate::{arena::*, bitmap::*, flat::*, props::*, spec::*, types::*};
 use alloc::vec::Vec;
 use vstd::prelude::*;
 
@@ -543,14 +543,17 @@ impl Engine {
             t = t + 1;
         }
         let ghost empty_lists: Seq<Seq<u32>> = Seq::new(ticks as nat, |k: int| Seq::<u32>::empty());
+        let bb = Bitmap::new(ticks);
+        let ab = Bitmap::new(ticks);
+        proof { assert(nonempty(empty_lists) =~= Seq::new(ticks as nat, |t: int| false)); }
         let e = Engine {
             ticks,
             cap,
             nodes,
             free_head: 0,
             free: Ghost(Seq::new(cap as nat, |k: int| k as u32)),
-            bids: Ladder { levels: bl, best: ticks, lists: Ghost(empty_lists) },
-            asks: Ladder { levels: al, best: ticks, lists: Ghost(empty_lists) },
+            bids: Ladder { levels: bl, best: ticks, lists: Ghost(empty_lists), bits: bb },
+            asks: Ladder { levels: al, best: ticks, lists: Ghost(empty_lists), bits: ab },
             next_seq: 0,
         };
         proof {
@@ -1551,14 +1554,17 @@ fn blank(ticks: u32, cap: u32) -> (e: Engine)
         t = t + 1;
     }
     let ghost empty_lists: Seq<Seq<u32>> = Seq::new(ticks as nat, |k: int| Seq::<u32>::empty());
+    let bb = Bitmap::new(ticks);
+    let ab = Bitmap::new(ticks);
+    proof { assert(nonempty(empty_lists) =~= Seq::new(ticks as nat, |t: int| false)); }
     let e = Engine {
         ticks,
         cap,
         nodes,
         free_head: NIL,
         free: Ghost(Seq::empty()),
-        bids: Ladder { levels: bl, best: ticks, lists: Ghost(empty_lists) },
-        asks: Ladder { levels: al, best: ticks, lists: Ghost(empty_lists) },
+        bids: Ladder { levels: bl, best: ticks, lists: Ghost(empty_lists), bits: bb },
+        asks: Ladder { levels: al, best: ticks, lists: Ghost(empty_lists), bits: ab },
         next_seq: 0,
     };
     proof {
