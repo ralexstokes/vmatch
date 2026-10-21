@@ -318,6 +318,23 @@ pub proof fn lemma_sorted_insert(ticks: u32, side: Side, bk: Seq<SOrder>, o: SOr
 // ---------------------------------------------------------------------------
 // The matching loop.
 
+/// Matching one more maker in front keeps the shape of the book after.
+pub proof fn lemma_after_shape_cons(bk: Seq<SOrder>, n: int, after: Seq<SOrder>)
+    requires
+        bk.len() > 0,
+        0 <= n <= bk.len() - 1,
+        book_after_shape(bk.drop_first(), n, after),
+    ensures
+        book_after_shape(bk, n + 1, after),
+{
+    let t = bk.drop_first();
+    assert(t.skip(n) =~= bk.skip(n + 1));
+    if n >= 1 {
+        assert(t.skip(n - 1) =~= bk.skip(n));
+        assert(t[n - 1] == bk[n]);
+    }
+}
+
 pub proof fn lemma_match_loop(
     ticks: u32,
     ms: Side,
@@ -382,11 +399,11 @@ pub proof fn lemma_match_loop(
                     assert(crosses(ticks, ms, t[k - 1], lim));
                 }
             }
-            assert(t.skip(n2) =~= bk.skip(n2 + 1));
-            if n2 >= 1 {
-                assert(t.skip(n2 - 1) =~= bk.skip(n2));
-                assert(t[n2 - 1] == bk[n2]);
+            lemma_after_shape_cons(bk, n2, r2.0);
+            assert(r2.1 > 0 ==> r.0 =~= bk.skip(n2 + 1)) by {
+                assert(t.skip(n2) =~= bk.skip(n2 + 1));
             }
+            assert(qsum(bk) == m.qty + qsum(t));
         } else {
             let b2 = bk.update(0, SOrder { qty: (m.qty - rem) as u64, ..m });
             let ev = Event::Fill { taker, maker: m.id, price: m.price, qty: rem };
@@ -442,6 +459,11 @@ pub proof fn lemma_ok_mono(ticks: u32, n1: u64, n2: u64, bk: Seq<SOrder>)
     }
 }
 
+/// Every order of `after` has the id and price of some order of `bk`.
+pub open spec fn drawn_from(after: Seq<SOrder>, bk: Seq<SOrder>) -> bool {
+    forall|i: int| 0 <= i < after.len() ==> exists|k: int| 0 <= k < bk.len() && #[trigger] after[i].id == bk[k].id && after[i].price == bk[k].price
+}
+
 /// Facts about the maker book after matching, from its shape.
 pub proof fn lemma_after_shape(ticks: u32, ms: Side, ns: u64, bk: Seq<SOrder>, n: int, after: Seq<SOrder>)
     requires
@@ -454,7 +476,7 @@ pub proof fn lemma_after_shape(ticks: u32, ms: Side, ns: u64, bk: Seq<SOrder>, n
         sorted(ticks, ms, after),
         orders_ok(ticks, ns, after),
         ids_unique(after),
-        forall|i: int| 0 <= i < after.len() ==> exists|k: int| 0 <= k < bk.len() && #[trigger] after[i].id == bk[k].id && after[i].price == bk[k].price,
+        drawn_from(after, bk),
         after.len() > 0 && bk.len() > 0 ==> idx(ticks, ms, bk[0].price) <= idx(ticks, ms, after[0].price),
 {
     if after =~= bk.skip(n) {
@@ -556,6 +578,71 @@ pub proof fn lemma_make_id(n: u64, slot: u32)
     vstd::arithmetic::div_mod::lemma_fundamental_div_mod_converse(v, 16777216, n as int, slot as int);
 }
 
+pub proof fn lemma_ids_disjoint_sym(a: Seq<SOrder>, b: Seq<SOrder>)
+    requires ids_disjoint(a, b),
+    ensures ids_disjoint(b, a),
+{
+    assert forall|i: int, j: int| 0 <= i < b.len() && 0 <= j < a.len() implies b[i].id != a[j].id by {
+        assert(a[j].id != b[i].id);
+    }
+}
+
+/// Inserting an order newer than every order of a book keeps its ids unique.
+pub proof fn lemma_ids_unique_insert(ticks: u32, own: Seq<SOrder>, ns: u64, o: SOrder, p: int)
+    requires
+        ids_unique(own),
+        orders_ok(ticks, ns, own),
+        seq_of(o.id) == ns,
+        0 <= p <= own.len(),
+    ensures
+        ids_unique(own.insert(p, o)),
+{
+    let own2 = own.insert(p, o);
+    assert forall|i: int, j: int| 0 <= i < own2.len() && 0 <= j < own2.len() && i != j
+        implies own2[i].id != own2[j].id by {
+        let ii = if i < p { i } else { i - 1 };
+        let jj = if j < p { j } else { j - 1 };
+        if i != p { assert(own2[i] == own[ii]); assert(order_ok(ticks, ns, own[ii])); }
+        if j != p { assert(own2[j] == own[jj]); assert(order_ok(ticks, ns, own[jj])); }
+    }
+}
+
+/// After `submit`, the taker's own book and the matched opposite book still
+/// have disjoint ids.
+pub proof fn lemma_ids_disjoint_after(
+    ticks: u32,
+    own: Seq<SOrder>,
+    own2: Seq<SOrder>,
+    bk: Seq<SOrder>,
+    opp2: Seq<SOrder>,
+    ns: u64,
+    o: SOrder,
+    p: int,
+    rest: bool,
+)
+    requires
+        ids_disjoint(own, bk),
+        orders_ok(ticks, ns, bk),
+        seq_of(o.id) == ns,
+        rest ==> 0 <= p <= own.len() && own2 == own.insert(p, o),
+        !rest ==> own2 == own,
+        drawn_from(opp2, bk),
+    ensures
+        ids_disjoint(own2, opp2),
+{
+    assert forall|i: int, j: int| 0 <= i < own2.len() && 0 <= j < opp2.len()
+        implies own2[i].id != opp2[j].id by {
+        let k = choose|k: int| 0 <= k < bk.len() && opp2[j].id == bk[k].id && opp2[j].price == bk[k].price;
+        assert(order_ok(ticks, ns, bk[k]));
+        if rest && i == p {
+        } else {
+            let ii = if rest && i > p { i - 1 } else { i };
+            assert(own2[i] == own[ii]);
+            assert(own[ii].id != bk[k].id);
+        }
+    }
+}
+
 /// Everything about `submit`.
 pub proof fn lemma_submit(s: SState, side: Side, price: u32, qty: u64, tif: Tif)
     requires inv(s), submit_ok(s, side, price, qty, tif),
@@ -574,6 +661,11 @@ pub proof fn lemma_submit(s: SState, side: Side, price: u32, qty: u64, tif: Tif)
         &&& (tif is PostOnly ==> fills.len() == 0)
     }),
 {
+    // The pairwise id quantifiers are expensive; they are only reasoned about
+    // in the helper lemmas.
+    hide(ids_unique);
+    hide(ids_disjoint);
+    hide(drawn_from);
     let ticks = s.ticks;
     let slot = s.free[0];
     let id = make_id(s.next_seq, slot);
@@ -625,30 +717,16 @@ pub proof fn lemma_submit(s: SState, side: Side, price: u32, qty: u64, tif: Tif)
             if i < p { assert(order_ok(ticks, ns, own[i])); }
             else if i > p { assert(own2[i] == own[i - 1]); assert(order_ok(ticks, ns, own[i - 1])); }
         }
-        assert forall|i: int, j: int| 0 <= i < own2.len() && 0 <= j < own2.len() && i != j
-            implies own2[i].id != own2[j].id by {
-            let ii = if i < p { i } else { i - 1 };
-            let jj = if j < p { j } else { j - 1 };
-            if i != p { assert(order_ok(ticks, s.next_seq, own[ii])); }
-            if j != p { assert(order_ok(ticks, s.next_seq, own[jj])); }
-        }
+        lemma_ids_unique_insert(ticks, own, s.next_seq, o, p);
         lemma_qsum_insert(own, p, o);
     }
     // ids across sides
-    assert forall|i: int, j: int| 0 <= i < own2.len() && 0 <= j < opp2.len()
-        implies own2[i].id != opp2[j].id by {
-        let k = choose|k: int| 0 <= k < bk.len() && opp2[j].id == bk[k].id && opp2[j].price == bk[k].price;
-        assert(order_ok(ticks, s.next_seq, bk[k]));
-        if rest && i == p {
-        } else {
-            let ii = if rest && i > p { i - 1 } else { i };
-            assert(own2[i] == own[ii]);
-            if side is Buy {
-                assert(s.bids[ii].id != s.asks[k].id);
-            } else {
-                assert(s.bids[k].id != s.asks[ii].id);
-            }
-        }
+    if side is Buy {
+        lemma_ids_disjoint_after(ticks, own, own2, bk, opp2, s.next_seq, o, p, rest);
+    } else {
+        lemma_ids_disjoint_sym(bk, own);
+        lemma_ids_disjoint_after(ticks, own, own2, bk, opp2, s.next_seq, o, p, rest);
+        lemma_ids_disjoint_sym(own2, opp2);
     }
     // uncrossed
     if own2.len() > 0 && opp2.len() > 0 {
@@ -684,6 +762,7 @@ pub proof fn lemma_submit(s: SState, side: Side, price: u32, qty: u64, tif: Tif)
         assert(tail.drop_first() =~= Seq::<Event>::empty());
     }
     assert(tail_qty(tail) == rem) by {
+        reveal_with_fuel(tail_qty, 2);
         if tail.len() > 0 { assert(tail.drop_first() =~= Seq::<Event>::empty()); }
     }
     // post-only never takes

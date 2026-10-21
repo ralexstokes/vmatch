@@ -240,6 +240,8 @@ pub fn match_exec(
                 let c = match_loop(ticks, ms, side_view(nodes@, *lad), lim as int, rem, taker, free@);
                 r_all == (c.0, c.1, fills + c.2, c.3)
             }),
+        ensures
+            rem == 0 || lad.best >= ticks || lad.best > lim,
         decreases side_view(nodes@, *lad).len() + (if rem > 0 { 1int } else { 0int }),
     {
         let ghost bk = side_view(nodes@, *lad);
@@ -272,45 +274,33 @@ pub fn match_exec(
         if m.qty <= rem {
             let ev = Event::Fill { taker, maker: m.id, price: m.price, qty: m.qty };
             out.push(ev);
+            let ghost rem0 = rem;
             rem = rem - m.qty;
             let ghost n1 = nodes@;
             let ghost lad1 = *lad;
             unlink(nodes, lad, ms, ticks, b, h, Ghost(0));
+            let ghost n_mid = nodes@;
+            let ghost fprev = free@;
             proof {
                 lemma_free_frame(n1, nodes@, *free_head, free@);
+                assert(n1[h as int].live && n1[h as int].side == ms);
+                assert(n0[h as int].live && n0[h as int].side == ms);
             }
             let g = free_push(nodes, free_head, Ghost(free@), h);
             *free = g;
             proof {
                 let n2 = nodes@;
-                lemma_ladder_frame_one(n1, n2, *lad, ms, ticks, h as int);
-                lemma_flat_pos(L, b as int, 0);
-                assert(flat_pos(L, b as int, 0) == 0) by {
+                lemma_ladder_frame_one(n_mid, n2, *lad, ms, ticks, h as int);
+                assert(side_view(n2, *lad) =~= bk.drop_first()) by {
+                    lemma_flat_pos(L, b as int, 0);
                     lemma_flat_take_empty(L, b as int);
+                    assert(bk.remove(0) =~= bk.drop_first());
                 }
-                assert(side_view(n2, *lad) =~= bk.remove(0));
-                assert(bk.remove(0) =~= bk.drop_first());
                 assert(slot_of(m.id) == h as int);
+                lemma_match_step_full(ticks, ms, bk, lim as int, rem0, taker, fprev, h, fills, r_all);
                 fills = fills + seq![ev];
-                // the remaining computation unfolds by one step
-                assert(match_loop(ticks, ms, bk, lim as int, (rem + m.qty) as u64, taker, free@.drop_first())
-                    == ({
-                        let r = match_loop(ticks, ms, bk.drop_first(), lim as int, rem, taker, seq![h] + free@.drop_first());
-                        (r.0, r.1, seq![ev] + r.2, r.3)
-                    }));
-                assert(free@ =~= seq![h] + free@.drop_first());
-                assert(fills.drop_last() + (seq![ev] + match_loop(ticks, ms, bk.drop_first(), lim as int, rem, taker, free@).2)
-                    =~= fills + match_loop(ticks, ms, bk.drop_first(), lim as int, rem, taker, free@).2);
                 lemma_partition_after_unlink(n1, n2, lad1, *lad, ms, ticks, b as int, h);
-                assert forall|x: u32| #[trigger] free@.contains(x) implies f0.contains(x) || (n0[x as int].live && n0[x as int].side == ms) by {
-                    if x == h {
-                    } else {
-                        assert(free@.drop_first().contains(x)) by {
-                            let k = choose|k: int| 0 <= k < free@.len() && free@[k] == x;
-                            assert(free@.drop_first()[k - 1] == x);
-                        }
-                    }
-                }
+                lemma_free_provenance(free@, fprev, f0, n0, h, ms);
             }
         } else {
             let ev = Event::Fill { taker, maker: m.id, price: m.price, qty: rem };
@@ -319,21 +309,16 @@ pub fn match_exec(
             set_qty(nodes, lad, ms, ticks, b, h, Ghost(0), m.qty - rem);
             proof {
                 let n2 = nodes@;
-                lemma_flat_pos_update(L, b as int, 0, SOrder { qty: (m.qty - rem) as u64, ..L[b as int][0] });
-                assert(flat_pos(L, b as int, 0) == 0) by {
+                assert(side_view(n2, *lad) =~= bk.update(0, SOrder { qty: (m.qty - rem) as u64, ..bk[0] })) by {
+                    lemma_flat_pos_update(L, b as int, 0, SOrder { qty: (m.qty - rem) as u64, ..L[b as int][0] });
                     lemma_flat_take_empty(L, b as int);
                 }
                 lemma_free_frame(n1, n2, *free_head, free@);
+                lemma_match_step_partial(ticks, ms, bk, lim as int, rem, taker, free@, fills, r_all);
                 fills = fills + seq![ev];
-                assert(match_loop(ticks, ms, bk, lim as int, rem, taker, free@)
-                    == (bk.update(0, SOrder { qty: (m.qty - rem) as u64, ..mo }), 0u64, seq![ev], free@));
                 lemma_partition_frame(n1, n2, *lad, ms, ticks);
             }
             rem = 0;
-            proof {
-                assert(match_loop(ticks, ms, side_view(nodes@, *lad), lim as int, rem, taker, free@).2 =~= Seq::<Event>::empty());
-                assert(fills + Seq::<Event>::empty() =~= fills);
-            }
         }
     }
     proof {
@@ -342,6 +327,92 @@ pub fn match_exec(
         assert(fills + Seq::<Event>::empty() =~= fills);
     }
     rem
+}
+
+/// One step of `match_loop` that fills the front maker completely.
+proof fn lemma_match_step_full(
+    ticks: u32,
+    ms: Side,
+    bk: Seq<SOrder>,
+    lim: int,
+    rem: u64,
+    taker: u64,
+    f: Seq<u32>,
+    h: u32,
+    fills: Seq<Event>,
+    r_all: (Seq<SOrder>, u64, Seq<Event>, Seq<u32>),
+)
+    requires
+        bk.len() > 0,
+        rem > 0,
+        crosses(ticks, ms, bk[0], lim),
+        bk[0].qty <= rem,
+        slot_of(bk[0].id) == h as int,
+        ({
+            let c = match_loop(ticks, ms, bk, lim, rem, taker, f);
+            r_all == (c.0, c.1, fills + c.2, c.3)
+        }),
+    ensures ({
+        let ev = Event::Fill { taker, maker: bk[0].id, price: bk[0].price, qty: bk[0].qty };
+        let c = match_loop(ticks, ms, bk.drop_first(), lim, (rem - bk[0].qty) as u64, taker, seq![h] + f);
+        r_all == (c.0, c.1, (fills + seq![ev]) + c.2, c.3)
+    }),
+{
+    let ev = Event::Fill { taker, maker: bk[0].id, price: bk[0].price, qty: bk[0].qty };
+    let c = match_loop(ticks, ms, bk.drop_first(), lim, (rem - bk[0].qty) as u64, taker, seq![h] + f);
+    assert(fills + (seq![ev] + c.2) =~= (fills + seq![ev]) + c.2);
+}
+
+/// One step of `match_loop` that partially fills the front maker, ending it.
+proof fn lemma_match_step_partial(
+    ticks: u32,
+    ms: Side,
+    bk: Seq<SOrder>,
+    lim: int,
+    rem: u64,
+    taker: u64,
+    f: Seq<u32>,
+    fills: Seq<Event>,
+    r_all: (Seq<SOrder>, u64, Seq<Event>, Seq<u32>),
+)
+    requires
+        bk.len() > 0,
+        rem > 0,
+        crosses(ticks, ms, bk[0], lim),
+        bk[0].qty > rem,
+        ({
+            let c = match_loop(ticks, ms, bk, lim, rem, taker, f);
+            r_all == (c.0, c.1, fills + c.2, c.3)
+        }),
+    ensures ({
+        let ev = Event::Fill { taker, maker: bk[0].id, price: bk[0].price, qty: rem };
+        let c = match_loop(ticks, ms, bk.update(0, SOrder { qty: (bk[0].qty - rem) as u64, ..bk[0] }), lim, 0, taker, f);
+        r_all == (c.0, c.1, (fills + seq![ev]) + c.2, c.3)
+    }),
+{
+    let ev = Event::Fill { taker, maker: bk[0].id, price: bk[0].price, qty: rem };
+    let b2 = bk.update(0, SOrder { qty: (bk[0].qty - rem) as u64, ..bk[0] });
+    let c = match_loop(ticks, ms, b2, lim, 0, taker, f);
+    assert(c.2 =~= Seq::<Event>::empty());
+    assert(fills + seq![ev] =~= (fills + seq![ev]) + c.2);
+}
+
+/// Pushing a slot that was a live maker keeps the free stack's provenance.
+proof fn lemma_free_provenance(f: Seq<u32>, fprev: Seq<u32>, f0: Seq<u32>, n0: Seq<Node>, h: u32, ms: Side)
+    requires
+        f == seq![h] + fprev,
+        n0[h as int].live && n0[h as int].side == ms,
+        forall|x: u32| #[trigger] fprev.contains(x) ==> f0.contains(x) || (n0[x as int].live && n0[x as int].side == ms),
+    ensures
+        forall|x: u32| #[trigger] f.contains(x) ==> f0.contains(x) || (n0[x as int].live && n0[x as int].side == ms),
+{
+    assert forall|x: u32| #[trigger] f.contains(x) implies f0.contains(x) || (n0[x as int].live && n0[x as int].side == ms) by {
+        if x != h {
+            let k = choose|k: int| 0 <= k < f.len() && f[k] == x;
+            assert(fprev[k - 1] == x);
+            assert(fprev.contains(x));
+        }
+    }
 }
 
 proof fn lemma_flat_take_empty(L: Seq<Seq<SOrder>>, b: int)
@@ -388,6 +459,7 @@ proof fn lemma_partition_after_unlink(n1: Seq<Node>, n2: Seq<Node>, lad1: Ladder
     requires
         side_partition(n1, lad1, side, ticks),
         n1.len() == n2.len(),
+        n1.len() <= MAX_CAPACITY,
         0 <= t < ticks,
         lad1.lists@.len() == ticks,
         lad2.lists@ == lad1.lists@.update(t, lad1.lists@[t].remove(0)),
@@ -404,6 +476,7 @@ proof fn lemma_partition_after_remove(n1: Seq<Node>, n2: Seq<Node>, lad1: Ladder
     requires
         side_partition(n1, lad1, side, ticks),
         n1.len() == n2.len(),
+        n1.len() <= MAX_CAPACITY,
         0 <= t < ticks,
         lad1.lists@.len() == ticks,
         0 <= i < lad1.lists@[t].len(),
@@ -607,8 +680,10 @@ impl Engine {
             invariant
                 ladder_wf(self.nodes@, *lad, ms, ticks),
                 L == ladder_view(self.nodes@, lad.lists@),
+                book(self.view(), ms) == flat(L),
+                ticks == self.ticks,
                 lad.best <= t <= ticks,
-                t <= lim + 1,
+                t <= lim + 1 || t == lad.best,
                 lim < ticks,
                 valid_qty(qty),
                 acc as int == qsum(flat(L.take(t as int))),
@@ -626,7 +701,10 @@ impl Engine {
                 invariant
                     ladder_wf(self.nodes@, *lad, ms, ticks),
                     L == ladder_view(self.nodes@, lad.lists@),
+                    book(self.view(), ms) == flat(L),
+                    ticks == self.ticks,
                     t < ticks,
+                    t <= lim,
                     l == lad.lists@[t as int],
                     level_wf(self.nodes@, lad.levels@[t as int], l, ms, t as int, ticks),
                     0 <= i <= l.len(),
@@ -646,6 +724,8 @@ impl Engine {
                 if acc >= qty {
                     proof {
                         lemma_fok_lower_bound(L, t as int, i + 1, lim as int);
+                        lemma_ladder_indexed(self.nodes@, *lad, ms, ticks);
+                        lemma_fillable_flat(ticks, ms, L, lim as int);
                     }
                     return true;
                 }
@@ -653,6 +733,7 @@ impl Engine {
                 proof { i = i + 1; }
             }
             proof {
+                if i < l.len() { assert(member_ok(self.nodes@, l, i, ms, t as int, ticks)); }
                 assert(L[t as int].take(i) =~= L[t as int]);
                 lemma_flat_len_take(L, t as int);
                 lemma_qsum_add(flat(L.take(t as int)), L[t as int]);
@@ -661,7 +742,12 @@ impl Engine {
         }
         proof {
             let n = if lim as int + 1 < L.len() { lim as int + 1 } else { L.len() as int };
-            assert(t as int == n);
+            if t > lim + 1 {
+                lemma_flat_take_empty(L, n);
+                assert(flat(L.take(n)) =~= Seq::<SOrder>::empty());
+            } else {
+                assert(t as int == n);
+            }
         }
         false
     }
@@ -679,6 +765,47 @@ impl Engine {
     {
         let ghost s0 = self.view();
         let ghost out0 = out@;
+        let (slot, id, rem) = self.submit_match(side, price, qty, out);
+        let ghost s1 = self.view();
+        let ghost out1 = out@;
+        self.submit_finish(side, price, slot, id, rem, tif, out);
+        proof {
+            let r = submit(s0, side, price, qty, tif);
+            assert(self.view() =~= r.0);
+            assert(out@ =~= out0 + r.1);
+        }
+    }
+
+    /// First half of `submit`: pop the taker's slot, allocate its id and
+    /// match it against the opposite side.
+    fn submit_match(&mut self, side: Side, price: u32, qty: u64, out: &mut Vec<Event>) -> (r: (u32, u64, u64))
+        requires
+            old(self).wf_core(),
+            inv(old(self).view()),
+            old(self).free@.len() > 0,
+            old(self).next_seq <= MAX_SEQ,
+            price < old(self).ticks,
+            valid_qty(qty),
+        ensures ({
+            let s0 = old(self).view();
+            let ms = opp(side);
+            let id = make_id(s0.next_seq, s0.free[0]);
+            let mr = match_loop(s0.ticks, ms, book(s0, ms), idx(s0.ticks, ms, price), qty, id, s0.free.drop_first());
+            &&& r.0 == s0.free[0]
+            &&& r.1 == id
+            &&& r.2 == mr.1
+            &&& r.2 <= qty
+            &&& slot_of(id) == r.0
+            &&& final(self).wf_core()
+            &&& final(self).view() == SState { free: mr.3, ..with_book(s0, ms, mr.0) }
+            &&& final(out)@ == old(out)@ + (seq![Event::Accepted { id, side, price, qty }] + mr.2)
+            &&& (r.0 as int) < final(self).nodes@.len()
+            &&& !final(self).nodes@[r.0 as int].live
+            &&& !final(self).free@.contains(r.0)
+        }),
+    {
+        let ghost s0 = self.view();
+        let ghost out0 = out@;
         let ticks = self.ticks;
         let (slot, fg) = free_pop(&self.nodes, &mut self.free_head, Ghost(self.free@));
         self.free = fg;
@@ -693,9 +820,8 @@ impl Engine {
         let ms = opp_exec(side);
         let lim = level_index(ticks, ms, price);
         let ghost n0 = self.nodes@;
-        let ghost bids0 = self.bids;
-        let ghost asks0 = self.asks;
         let ghost f1 = self.free@;
+        let ghost out1 = out@;
         let rem;
         if is_buy(ms) {
             rem = match_exec(&mut self.nodes, &mut self.bids, &mut self.free_head, &mut self.free, ms, ticks, lim, qty, id, out);
@@ -710,11 +836,19 @@ impl Engine {
                 lemma_partition_other(n0, self.nodes@, self.bids, Side::Buy, Side::Sell, ticks);
             }
         }
-        let ghost mr = match_loop(ticks, ms, book(s0, ms), lim as int, qty, id, s0.free.drop_first());
         proof {
+            let mr = match_loop(ticks, ms, book(s0, ms), lim as int, qty, id, s0.free.drop_first());
             assert(book(s0, ms) == side_view(n0, lad_of(*old(self), ms)));
             assert(rem == mr.1);
             assert(self.free@ == mr.3);
+            assert(rem <= qty) by {
+                lemma_inv_book(s0, ms);
+                let free0 = s0.free.drop_first();
+                assert forall|k: int| 0 <= k < free0.len() implies (#[trigger] free0[k]) < SLOT_SPACE by {
+                    assert(free0[k] == s0.free[k + 1]);
+                }
+                lemma_match_loop(ticks, ms, book(s0, ms), lim as int, qty, id, free0);
+            }
             // the in-flight taker slot is untouched: dead, unlisted, not free
             assert(!n0[slot as int].live);
             assert(self.nodes@[slot as int] == n0[slot as int]);
@@ -723,7 +857,52 @@ impl Engine {
                     assert(f1.contains(slot) || n0[slot as int].live);
                 }
             }
+            assert(self.view() =~= SState { free: mr.3, ..with_book(s0, ms, mr.0) });
+            assert(out@ =~= out0 + (seq![Event::Accepted { id, side, price, qty }] + mr.2));
         }
+        (slot, id, rem)
+    }
+
+    /// Second half of `submit`: rest the taker's remainder (in the slot it
+    /// was allocated) or expire it and release the slot.
+    fn submit_finish(&mut self, side: Side, price: u32, slot: u32, id: u64, rem: u64, tif: Tif, out: &mut Vec<Event>)
+        requires
+            old(self).wf_core(),
+            old(self).next_seq <= MAX_SEQ,
+            price < old(self).ticks,
+            rem <= MAX_QTY,
+            slot_of(id) == slot,
+            (slot as int) < old(self).nodes@.len(),
+            !old(self).nodes@[slot as int].live,
+            !old(self).free@.contains(slot),
+        ensures ({
+            let s1 = old(self).view();
+            let own = book(s1, side);
+            let rest = rem > 0 && rests(tif);
+            let own2 = if rest {
+                own.insert(ins_pos(s1.ticks, side, own, idx(s1.ticks, side, price)), SOrder { id, price, qty: rem })
+            } else {
+                own
+            };
+            let tail = if rest {
+                seq![Event::Rested { id, qty: rem }]
+            } else if rem > 0 {
+                seq![Event::Expired { id, qty: rem }]
+            } else {
+                Seq::empty()
+            };
+            &&& final(self).wf_core()
+            &&& final(self).view() == SState {
+                    free: if rest { s1.free } else { seq![slot] + s1.free },
+                    next_seq: (s1.next_seq + 1) as u64,
+                    ..with_book(s1, side, own2)
+                }
+            &&& final(out)@ == old(out)@ + tail
+        }),
+    {
+        let ghost s1 = self.view();
+        let ghost out1 = out@;
+        let ticks = self.ticks;
         let ghost n1 = self.nodes@;
         let ghost e_mid = *self;
         if rem > 0 && rests_exec(tif) {
@@ -744,9 +923,8 @@ impl Engine {
                 let n2 = self.nodes@;
                 lemma_free_after_push_back(n1, n2, self.free_head, self.free@, slot);
                 lemma_partition_after_push(n1, n2, e_mid, *self, side, ticks, slot, t);
-                let L = ladder_view(n1, lad_of(*old(self), side).lists@);
-                lemma_ladder_indexed(n0, lad_of(*old(self), side), side, ticks);
-                lemma_ladder_frame(n0, n1, lad_of(*old(self), side), side, ticks);
+                let L = ladder_view(n1, lad_of(e_mid, side).lists@);
+                lemma_ladder_indexed(n1, lad_of(e_mid, side), side, ticks);
                 lemma_flat_push_level(ticks, side, L, t as int, SOrder { id, price, qty: rem });
             }
         } else {
@@ -761,14 +939,17 @@ impl Engine {
                 lemma_ladder_frame_one(n1, n2, self.asks, Side::Sell, ticks, slot as int);
                 lemma_partition_frame(n1, n2, self.bids, Side::Buy, ticks);
                 lemma_partition_frame(n1, n2, self.asks, Side::Sell, ticks);
-                lemma_ladder_frame(n0, n1, lad_of(*old(self), side), side, ticks);
             }
         }
         self.next_seq = self.next_seq + 1;
         proof {
-            let r = submit(s0, side, price, qty, tif);
-            assert(self.view() =~= r.0);
-            assert(out@ =~= out0 + r.1);
+            assert(out@ =~= out1 + (if rem > 0 && rests(tif) {
+                seq![Event::Rested { id, qty: rem }]
+            } else if rem > 0 {
+                seq![Event::Expired { id, qty: rem }]
+            } else {
+                Seq::<Event>::empty()
+            }));
         }
     }
 
@@ -973,11 +1154,19 @@ impl Engine {
         let t = level_index(ticks, n.side, n.price);
         let ghost lad0 = lad_of(*self, n.side);
         let ghost i = lad0.lists@[t as int].index_of(slot);
+        proof {
+            // the order found by the model is this node
+            let L = ladder_view(self.nodes@, lad0.lists@);
+            lad0.lists@[t as int].index_of_first_ensures(slot);
+            assert(ladder_wf(self.nodes@, lad0, n.side, ticks));
+            lemma_member(self.nodes@, lad0, n.side, ticks, t as int, i);
+            lemma_ladder_indexed(self.nodes@, lad0, n.side, ticks);
+            lemma_flat_pos(L, t as int, i);
+            assert(book(s0, n.side) == flat(L));
+            assert(book(s0, n.side)[flat_pos(L, t as int, i)] == ord(n));
+        }
         if price == n.price && qty <= n.qty {
             let ghost n0 = self.nodes@;
-            proof {
-                lad0.lists@[t as int].index_of_first_ensures(slot);
-            }
             if is_buy(n.side) {
                 set_qty(&mut self.nodes, &self.bids, n.side, ticks, t, slot, Ghost(i), qty);
                 proof { lemma_ladder_frame(n0, self.nodes@, self.asks, Side::Sell, ticks); }
@@ -1048,6 +1237,7 @@ proof fn lemma_qsum_take_step(l: Seq<SOrder>, i: int)
     requires 0 <= i < l.len(),
     ensures qsum(l.take(i + 1)) == qsum(l.take(i)) + l[i].qty,
 {
+    reveal_with_fuel(qsum, 2);
     assert(l.take(i + 1) =~= l.take(i) + seq![l[i]]);
     lemma_qsum_add(l.take(i), seq![l[i]]);
     assert(seq![l[i]].drop_first() =~= Seq::<SOrder>::empty());
@@ -1314,6 +1504,7 @@ fn export_side(nodes: &Vec<Node>, lad: &Ladder, side: Side, ticks: u32, out: &mu
             cur = n.next;
         }
         proof {
+            if i < l.len() { assert(member_ok(nodes@, l, i, side, t as int, ticks)); }
             assert(L[t as int].take(i) =~= L[t as int]);
             lemma_flat_len_take(L, t as int);
             assert(out@ =~= out0 + flat(L.take(t as int + 1)));
@@ -1491,8 +1682,11 @@ impl Engine {
         e.next_seq = next_seq;
         e.fill_side(Side::Buy, bids);
         e.fill_side(Side::Sell, asks);
+        let ghost n2 = e.nodes@;
         e.fill_free(free);
         proof {
+            lemma_ladder_frame(n2, e.nodes@, e.bids, Side::Buy, ticks);
+            lemma_ladder_frame(n2, e.nodes@, e.asks, Side::Sell, ticks);
             let v = e.view();
             lemma_adj_sorted(ticks, Side::Buy, bids@);
             lemma_adj_sorted(ticks, Side::Sell, asks@);
@@ -1524,6 +1718,7 @@ fn check_side(ticks: u32, cap: u32, side: Side, b: &Vec<SOrder>, next_seq: u64) 
         if o.price >= ticks || o.qty == 0 || o.qty > MAX_QTY || o.id / SLOT_SPACE >= next_seq || o.id % SLOT_SPACE >= cap as u64 {
             return false;
         }
+        proof { if k > 0 { assert(order_ok(ticks, next_seq, b@[k - 1])); } }
         if k > 0 && !key_lt_exec(ticks, side, b[k - 1], o) {
             return false;
         }
@@ -1599,6 +1794,7 @@ impl Engine {
             side_partition(final(self).nodes@, final(self).asks, Side::Sell, final(self).ticks),
             side_view(final(self).nodes@, lad_of(*final(self), side)) == b@,
             side_view(final(self).nodes@, lad_of(*final(self), opp(side))) == side_view(old(self).nodes@, lad_of(*old(self), opp(side))),
+            lad_of(*final(self), opp(side)) == lad_of(*old(self), opp(side)),
             forall|s: int| 0 <= s < final(self).nodes@.len() && !(exists|k: int| 0 <= k < b@.len() && slot_of(#[trigger] b@[k].id) == s)
                 ==> #[trigger] final(self).nodes@[s] == old(self).nodes@[s],
     {
@@ -1619,6 +1815,11 @@ impl Engine {
                 self.cap == old(self).cap, self.next_seq == old(self).next_seq,
                 self.free == old(self).free, self.free_head == old(self).free_head,
                 self.nodes@.len() == n0.len(),
+                n0.len() == old(self).cap,
+                n0 == old(self).nodes@,
+                old(self).ticks == ticks,
+                forall|t: int| 0 <= t < old(self).ticks ==> (#[trigger] lad_of(*old(self), side).lists@[t]).len() == 0,
+                side_partition(n0, lad_of(*old(self), side), side, ticks),
                 k <= b@.len(),
                 ladder_wf(self.nodes@, self.bids, Side::Buy, ticks),
                 ladder_wf(self.nodes@, self.asks, Side::Sell, ticks),
@@ -1637,9 +1838,13 @@ impl Engine {
             decreases b@.len() - k,
         {
             let o = b[k];
+            proof {
+                assert(order_ok(ticks, old(self).next_seq, b@[k as int]));
+                assert(slot_of(o.id) < old(self).cap);
+            }
             let slot = (o.id % SLOT_SPACE) as u32;
+            proof { assert(slot as int == slot_of(o.id)); }
             let t = level_index(ticks, side, o.price);
-            proof { assert(order_ok(ticks, old(self).next_seq, b@[k as int])); }
             let ghost n1 = self.nodes@;
             let ghost lad1 = lad_of(*self, side);
             if is_buy(side) {
@@ -1684,13 +1889,31 @@ impl Engine {
             }
             k = k + 1;
         }
-        proof { assert(b@.take(b@.len() as int) =~= b@); }
+        proof {
+            assert(b@.take(b@.len() as int) =~= b@);
+            // the opposite side's members were live in `n0`, so never pushed over
+            let other = lad_of(*old(self), opp(side));
+            assert forall|s: int| 0 <= s < n0.len() && n0[s].live && n0[s].side == opp(side)
+                implies #[trigger] self.nodes@[s] == n0[s] by {
+                if exists|j: int| 0 <= j < b@.len() && slot_of(#[trigger] b@[j].id) == s {
+                    let j = choose|j: int| 0 <= j < b@.len() && slot_of(#[trigger] b@[j].id) == s;
+                    assert(!old(self).nodes@[slot_of(b@[j].id)].live);
+                }
+            }
+            if side is Buy {
+                assert(ladder_wf(n0, other, Side::Sell, ticks));
+            } else {
+                assert(ladder_wf(n0, other, Side::Buy, ticks));
+            }
+            lemma_ladder_frame(n0, self.nodes@, other, opp(side), ticks);
+        }
     }
 
     /// Build the free stack so that its top is `f[0]`.
     fn fill_free(&mut self, f: &Vec<u32>)
         requires
             old(self).nodes@.len() == old(self).cap,
+            old(self).cap <= MAX_CAPACITY,
             old(self).free@ == Seq::<u32>::empty(),
             old(self).free_head == NIL,
             forall|a: int| 0 <= a < f@.len() ==> (#[trigger] f@[a]) < old(self).cap && !old(self).nodes@[f@[a] as int].live,
@@ -1705,12 +1928,19 @@ impl Engine {
             final(self).ticks == old(self).ticks, final(self).cap == old(self).cap, final(self).next_seq == old(self).next_seq,
             final(self).bids == old(self).bids, final(self).asks == old(self).asks,
     {
+        // `free_push` maintains `free_wf`; this loop never needs to look inside.
+        hide(free_wf);
         let mut j = f.len();
-        proof { assert(f@.skip(j as int) =~= Seq::<u32>::empty()); }
+        proof {
+            assert(f@.skip(j as int) =~= Seq::<u32>::empty());
+            assert(free_wf(self.nodes@, self.free_head, self.free@)) by { reveal(free_wf); }
+        }
         while j > 0
             invariant
                 j <= f@.len(),
                 self.nodes@.len() == old(self).nodes@.len(),
+                old(self).nodes@.len() == old(self).cap,
+                old(self).cap <= MAX_CAPACITY,
                 self.free@ == f@.skip(j as int),
                 free_wf(self.nodes@, self.free_head, self.free@),
                 forall|a: int| 0 <= a < f@.len() ==> (#[trigger] f@[a]) < old(self).cap && !old(self).nodes@[f@[a] as int].live,
@@ -1730,10 +1960,22 @@ impl Engine {
                     assert(f@[j as int + 1 + k] == x);
                 }
             }
+            proof { assert(x < old(self).cap && !old(self).nodes@[x as int].live); }
+            let ghost nprev = self.nodes@;
             let g = free_push(&mut self.nodes, &mut self.free_head, Ghost(self.free@), x);
             self.free = g;
-            proof { assert(self.free@ =~= f@.skip(j as int)); }
+            proof {
+                assert(self.free@ =~= f@.skip(j as int));
+                assert forall|s: int| 0 <= s < self.nodes@.len() implies payload_same(#[trigger] self.nodes@[s], old(self).nodes@[s])
+                    && self.nodes@[s].live == old(self).nodes@[s].live && self.nodes@[s].prev == old(self).nodes@[s].prev by {
+                    assert(payload_same(nprev[s], old(self).nodes@[s]));
+                }
+                assert forall|s: int| 0 <= s < self.nodes@.len() && old(self).nodes@[s].live implies #[trigger] self.nodes@[s] == old(self).nodes@[s] by {
+                    assert(nprev[s] == old(self).nodes@[s]);
+                }
+            }
         }
+        proof { assert(f@.skip(0) =~= f@); }
     }
 }
 

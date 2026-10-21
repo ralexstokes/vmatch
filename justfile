@@ -24,12 +24,16 @@ test:
 doc-check:
     RUSTDOCFLAGS="-D warnings" cargo doc --locked --workspace --no-deps --all-features
 
+# Check the Verus proofs of the core crate (mirrors the `verus` flake check).
+verify:
+    cd core && cargo verus focus -- --no-cheating
+
 nixfmt-check:
     git ls-files -z '*.nix' | xargs -0 nixfmt --check
 
 # Fast local CI mirror — reuses the local cargo cache and incremental builds.
 # The clean Nix lane retains the explicit all-target build for non-test codegen coverage.
-ci: fmt lint test doc-check nixfmt-check
+ci: fmt lint test doc-check verify nixfmt-check
 
 # Full clean Nix CI lane; use before pushing or when touching Nix files.
 ci-nix:

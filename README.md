@@ -79,8 +79,9 @@ Events: `Accepted`, `Fill{taker, maker, price, qty}`, `Rested`, `Expired`,
 What you have to trust for the guarantees above to hold:
 
 * **The model** (`spec.rs`, ~300 lines) says what you mean. Read it.
-* Verus, Z3 and rustc. The proof was checked with Verus at commit `f8c9deb8`
-  (Rust 1.97), Z3 4.16.0.
+* Verus, Z3 and rustc. The proof is checked with Verus
+  `0.2026.10.18.7d82994` (Rust 1.99.1), Z3 4.16.0, pinned in `nix/verus.nix`
+  and `rust-toolchain.toml`.
 * `vstd`'s specifications of `Vec` (indexing, push).
 * Allocation: `Vec::push` on the output event buffer may allocate; allocation
   failure aborts (outside the proof). The order arena never allocates after
@@ -110,6 +111,10 @@ Wire format: 24-byte command frames in, one response batch per command out
 ## Re-checking the proofs
 
 ```bash
-# with Verus installed (cargo-verus on PATH):
-cd core && cargo verus verify
+./tools/dev just verify     # cd core && cargo verus focus -- --no-cheating
 ```
+
+The Nix devshell provides Verus. `--no-cheating` rejects `assume`, `admit`,
+`external_body` and `assume_specification` in the core crate. CI runs the same
+check (`just ci`, and the `verus` flake check in `nix flake check`), so a
+green build means the proofs hold.
