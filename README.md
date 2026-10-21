@@ -31,8 +31,10 @@ every command:
 
 **2. Refinement** (`core/src/engine.rs`): the optimised engine — a preallocated
 arena of nodes threaded into intrusive doubly-linked FIFO lists per price level,
-a directly indexed price ladder per side with best-level tracking, and a free
-stack — is proven to compute **exactly** the model's transition:
+a directly indexed price ladder per side with best-level tracking (a 64-ary
+hierarchical bitmap of non-empty levels finds the next best level in O(1) when
+the best one empties, however far away it is), and a free stack — is proven to
+compute **exactly** the model's transition:
 
 ```rust
 pub fn step(&mut self, cmd: Command, out: &mut Vec<Event>)
@@ -79,9 +81,10 @@ Events: `Accepted`, `Fill{taker, maker, price, qty}`, `Rested`, `Expired`,
 What you have to trust for the guarantees above to hold:
 
 * **The model** (`spec.rs`, ~300 lines) says what you mean. Read it.
-* Verus, Z3 and rustc. The proof was checked with Verus at commit `f8c9deb8`
-  (Rust 1.97), Z3 4.16.0.
-* `vstd`'s specifications of `Vec` (indexing, push).
+* Verus, Z3 and rustc. The proof is checked with Verus
+  `0.2026.10.18.7d82994` (Rust 1.99.1), Z3 4.16.0, pinned in `nix/verus.nix`
+  and `rust-toolchain.toml`.
+* `vstd`'s specifications of `Vec` (indexing, push) and of `u64::trailing_zeros`.
 * Allocation: `Vec::push` on the output event buffer may allocate; allocation
   failure aborts (outside the proof). The order arena never allocates after
   construction.
@@ -100,6 +103,7 @@ cargo build --release
 ./target/release/vmatchd --listen 127.0.0.1:9100 --feed 127.0.0.1:9101 \
     --ticks 65536 --capacity 1048576 --journal /var/lib/vmatch/journal
 cargo run --release -p vmatch-service --example bench     # in-process latency
+cargo run --release -p vmatch-service --example gap       # worst-case best-level recovery
 cargo run --release -p vmatch-service --example loadgen -- 127.0.0.1:9100 100000
 cargo test --release                                       # differential + recovery tests
 ```
@@ -110,6 +114,10 @@ Wire format: 24-byte command frames in, one response batch per command out
 ## Re-checking the proofs
 
 ```bash
-# with Verus installed (cargo-verus on PATH):
-cd core && cargo verus verify
+./tools/dev just verify     # cd core && cargo verus focus -- --no-cheating
 ```
+
+The Nix devshell provides Verus. `--no-cheating` rejects `assume`, `admit`,
+`external_body` and `assume_specification` in the core crate. CI runs the same
+check (`just ci`, and the `verus` flake check in `nix flake check`), so a
+green build means the proofs hold.

@@ -2,7 +2,7 @@
 //! FIFO lists (one per price level per side) and a singly linked free stack.
 //! Every operation is O(1) and allocation-free.
 
-use crate::{flat::*, spec::*, types::*};
+use crate::{bitmap::*, flat::*, spec::*, types::*};
 use alloc::vec::Vec;
 use vstd::prelude::*;
 
@@ -32,6 +32,8 @@ pub struct Ladder {
     pub best: u32,
     /// Ghost: the slots in each level, front (oldest) first.
     pub lists: Ghost<Seq<Seq<u32>>>,
+    /// Which levels are non-empty, for finding the next best level in O(1).
+    pub bits: Bitmap,
 }
 
 // ---------------------------------------------------------------------------
@@ -90,9 +92,15 @@ pub open spec fn best_ok(lad: Ladder, ticks: u32) -> bool {
     &&& lad.best < ticks ==> lad.lists@[lad.best as int].len() > 0
 }
 
+/// Which levels of a ladder are non-empty.
+pub open spec fn nonempty(ls: Seq<Seq<u32>>) -> Seq<bool> {
+    Seq::new(ls.len(), |t: int| ls[t].len() > 0)
+}
+
 pub open spec fn ladder_wf(nodes: Seq<Node>, lad: Ladder, side: Side, ticks: u32) -> bool {
     &&& nodes.len() <= MAX_CAPACITY
     &&& ticks <= MAX_TICKS
+    &&& bitmap_wf(lad.bits, nonempty(lad.lists@))
     &&& lad.levels@.len() == ticks
     &&& lad.lists@.len() == ticks
     &&& forall|t: int| 0 <= t < ticks ==> #[trigger] level_wf(nodes, lad.levels@[t], lad.lists@[t], side, t, ticks)
@@ -152,6 +160,7 @@ pub proof fn lemma_level_frame(n1: Seq<Node>, n2: Seq<Node>, lv: Level, l: Seq<u
 pub proof fn lemma_member(nodes: Seq<Node>, lad: Ladder, side: Side, ticks: u32, t: int, i: int)
     requires ladder_wf(nodes, lad, side, ticks), 0 <= t < ticks, 0 <= i < lad.lists@[t].len(),
     ensures
+        level_wf(nodes, lad.levels@[t], lad.lists@[t], side, t, ticks),
         member_ok(nodes, lad.lists@[t], i, side, t, ticks),
         nodes[lad.lists@[t][i] as int].live,
         nodes[lad.lists@[t][i] as int].side == side,
@@ -180,7 +189,9 @@ pub proof fn lemma_ladder_frame(n1: Seq<Node>, n2: Seq<Node>, lad: Ladder, side:
         lemma_level_frame(n1, n2, lad.levels@[t], l, side, t, ticks);
     }
     assert forall|t: int| 0 <= t < lad.lists@.len() implies
-        ladder_view(n2, lad.lists@)[t] =~= ladder_view(n1, lad.lists@)[t] by {}
+        ladder_view(n2, lad.lists@)[t] =~= ladder_view(n1, lad.lists@)[t] by {
+        assert(level_wf(n2, lad.levels@[t], lad.lists@[t], side, t, ticks));
+    }
 }
 
 pub proof fn lemma_free_frame(n1: Seq<Node>, n2: Seq<Node>, head: u32, f: Seq<u32>)
@@ -277,6 +288,9 @@ pub fn push_back(
     let old_tail = lv.tail;
     nodes[slot as usize] = Node { id, qty, next: NIL, prev: old_tail, price, side, live: true };
     if old_tail == NIL {
+        proof {
+            if l0.len() > 0 { lemma_member(n0, lad0, side, ticks, t as int, l0.len() - 1); }
+        }
         lad.levels[t as usize] = Level { head: slot, tail: slot };
     } else {
         proof { lemma_member(n0, *lad, side, ticks, t as int, l0.len() - 1); }
@@ -289,6 +303,8 @@ pub fn push_back(
     proof {
         lad.lists@ = ls0.update(t as int, l1);
     }
+    lad.bits.set(Ghost(nonempty(ls0)), t);
+    proof { assert(nonempty(lad.lists@) =~= nonempty(ls0).update(t as int, true)); }
     if t < lad.best {
         lad.best = t;
     }
@@ -341,6 +357,75 @@ pub fn push_back(
                 }
             }
         }
+    }
+}
+
+pub proof fn lemma_remove_no_duplicates(l: Seq<u32>, i: int)
+    requires l.no_duplicates(), 0 <= i < l.len(),
+    ensures l.remove(i).no_duplicates(),
+{
+    let l1 = l.remove(i);
+    assert forall|a: int, b: int| 0 <= a < l1.len() && 0 <= b < l1.len() && a != b implies l1[a] != l1[b] by {
+        let aa = if a < i { a } else { a + 1 };
+        let bb = if b < i { b } else { b + 1 };
+        assert(l1[a] == l[aa] && l1[b] == l[bb]);
+    }
+}
+
+/// Unlinking position `i` of a well-formed level: the slot is marked dead and
+/// its neighbours are linked to each other.
+proof fn lemma_unlink_level(
+    n0: Seq<Node>,
+    n1: Seq<Node>,
+    lv0: Level,
+    lv1: Level,
+    l0: Seq<u32>,
+    i: int,
+    side: Side,
+    t: int,
+    ticks: u32,
+)
+    requires
+        level_wf(n0, lv0, l0, side, t, ticks),
+        n0.len() <= MAX_CAPACITY,
+        n1.len() == n0.len(),
+        0 <= i < l0.len(),
+        forall|s: int| 0 <= s < n0.len() && s != l0[i] && s != prev_of(l0, i) && s != next_of(l0, i)
+            ==> #[trigger] n1[s] == n0[s],
+        n1[l0[i] as int] == (Node { live: false, ..n0[l0[i] as int] }),
+        i > 0 ==> n1[l0[i - 1] as int] == (Node { next: next_of(l0, i), ..n0[l0[i - 1] as int] }),
+        i + 1 < l0.len() ==> n1[l0[i + 1] as int] == (Node { prev: prev_of(l0, i), ..n0[l0[i + 1] as int] }),
+        lv1.head == (if i == 0 { next_of(l0, i) } else { lv0.head }),
+        lv1.tail == (if i + 1 == l0.len() { prev_of(l0, i) } else { lv0.tail }),
+    ensures
+        level_wf(n1, lv1, l0.remove(i), side, t, ticks),
+        level_view(n1, l0.remove(i)) =~= level_view(n0, l0).remove(i),
+{
+    // Distinctness is only needed at a few specific pairs; reveal it there.
+    hide(Seq::no_duplicates);
+    let l1 = l0.remove(i);
+    lemma_remove_no_duplicates(l0, i);
+    assert forall|j: int| 0 <= j < l1.len() implies #[trigger] member_ok(n1, l1, j, side, t, ticks)
+        && n1[l1[j] as int].id == n0[l1[j] as int].id
+        && n1[l1[j] as int].price == n0[l1[j] as int].price
+        && n1[l1[j] as int].qty == n0[l1[j] as int].qty by {
+        let jj = if j < i { j } else { j + 1 };
+        assert(l1[j] == l0[jj]);
+        assert(member_ok(n0, l0, jj, side, t, ticks));
+        assert(l0[jj] != l0[i]) by { reveal(Seq::no_duplicates); }
+        if i > 0 && jj != i - 1 { assert(l0[jj] != l0[i - 1]) by { reveal(Seq::no_duplicates); } }
+        if i + 1 < l0.len() && jj != i + 1 { assert(l0[jj] != l0[i + 1]) by { reveal(Seq::no_duplicates); } }
+        if i > 0 { assert(member_ok(n0, l0, i - 1, side, t, ticks)); }
+        if i + 1 < l0.len() { assert(member_ok(n0, l0, i + 1, side, t, ticks)); }
+        if jj + 1 < l0.len() { assert(member_ok(n0, l0, jj + 1, side, t, ticks)); }
+        if jj > 0 { assert(member_ok(n0, l0, jj - 1, side, t, ticks)); }
+    }
+    if l1.len() > 0 {
+        assert(member_ok(n0, l0, 0, side, t, ticks));
+        assert(member_ok(n0, l0, l0.len() - 1, side, t, ticks));
+    }
+    assert forall|j: int| 0 <= j < l1.len() implies level_view(n1, l1)[j] == level_view(n0, l0).remove(i)[j] by {
+        assert(member_ok(n1, l1, j, side, t, ticks));
     }
 }
 
@@ -405,23 +490,15 @@ pub fn unlink(nodes: &mut Vec<Node>, lad: &mut Ladder, side: Side, ticks: u32, t
     proof {
         lad.lists@ = ls0.update(t as int, l1);
         let n1 = nodes@;
-        // uniqueness: neighbours are distinct from the removed slot
-        assert forall|a: int, b: int| 0 <= a < l0.len() && 0 <= b < l0.len() && a != b implies l0[a] != l0[b] by {}
-        assert(l1.no_duplicates()) by {
-            assert forall|a: int, b: int| 0 <= a < l1.len() && 0 <= b < l1.len() && a != b implies l1[a] != l1[b] by {
-                let aa = if a < i { a } else { a + 1 };
-                let bb = if b < i { b } else { b + 1 };
-                assert(l1[a] == l0[aa] && l1[b] == l0[bb]);
-            }
-        }
-        assert forall|j: int| 0 <= j < l1.len() implies #[trigger] member_ok(n1, l1, j, side, t as int, ticks) by {
-            let jj = if j < i { j } else { j + 1 };
-            assert(l1[j] == l0[jj]);
-            assert(member_ok(n0, l0, jj, side, t as int, ticks));
-            assert(l0[jj] != slot);
-        }
-        assert(level_wf(n1, lad.levels@[t as int], l1, side, t as int, ticks));
-        // other levels
+        assert(n1.len() == n0.len());
+        assert(p == prev_of(l0, i) && nx == next_of(l0, i));
+        assert(p == NIL <==> i == 0);
+        assert(nx == NIL <==> i + 1 == l0.len());
+        assert forall|s: int| 0 <= s < n0.len() && s != l0[i] && s != prev_of(l0, i) && s != next_of(l0, i)
+            implies #[trigger] n1[s] == n0[s] by {}
+        lemma_unlink_level(n0, n1, lad0.levels@[t as int], lad.levels@[t as int], l0, i, side, t as int, ticks);
+        // other levels: their members are at other indices, so none of them is
+        // `slot` or one of its neighbours
         assert forall|tt: int| 0 <= tt < ticks && tt != t implies
             #[trigger] level_wf(n1, lad.levels@[tt], lad.lists@[tt], side, tt, ticks)
             && level_view(n1, lad.lists@[tt]) =~= level_view(n0, ls0[tt]) by {
@@ -429,7 +506,6 @@ pub fn unlink(nodes: &mut Vec<Node>, lad: &mut Ladder, side: Side, ticks: u32, t
             assert forall|k: int| 0 <= k < l.len() implies n1[(#[trigger] l[k]) as int] == n0[l[k] as int] by {
                 lemma_member(n0, lad0, side, ticks, tt, k);
             }
-            assert(level_wf(n0, lad0.levels@[tt], l, side, tt, ticks));
             lemma_level_frame(n0, n1, lad.levels@[tt], l, side, tt, ticks);
         }
         assert forall|s: int| 0 <= s < n0.len() && s != -1 && !(n0[s].live && n0[s].side == side)
@@ -437,11 +513,8 @@ pub fn unlink(nodes: &mut Vec<Node>, lad: &mut Ladder, side: Side, ticks: u32, t
         let V0 = ladder_view(n0, ls0);
         let V1 = ladder_view(n1, lad.lists@);
         assert forall|tt: int| 0 <= tt < ticks implies V1[tt] =~= V0.update(t as int, V0[t as int].remove(i))[tt] by {
-            if tt == t {
-                assert forall|j: int| 0 <= j < l1.len() implies level_view(n1, l1)[j] == V0[t as int].remove(i)[j] by {
-                    let jj = if j < i { j } else { j + 1 };
-                    assert(l0[jj] != slot);
-                }
+            if tt != t {
+                assert(level_wf(n1, lad.levels@[tt], lad.lists@[tt], side, tt, ticks));
             }
         }
     }
@@ -449,44 +522,25 @@ pub fn unlink(nodes: &mut Vec<Node>, lad: &mut Ladder, side: Side, ticks: u32, t
     let emptied = head == NIL;
     proof {
         assert(level_wf(nodes@, lad.levels@[t as int], l1, side, t as int, ticks));
-        if l1.len() > 0 { assert(head == l1[0]); assert((l1[0] as int) < nodes@.len()); }
+        if l1.len() > 0 { assert(head == l1[0]); assert(member_ok(nodes@, l1, 0, side, t as int, ticks)); }
         assert(emptied <==> l1.len() == 0);
     }
-    if emptied && lad.best == t {
-        let b = scan(lad, nodes, side, ticks, t + 1);
-        lad.best = b;
-    }
-}
-
-/// First non-empty level at or after `from`, or `ticks`.
-pub fn scan(lad: &Ladder, nodes: &Vec<Node>, side: Side, ticks: u32, from: u32) -> (r: u32)
-    requires
-        lad.levels@.len() == ticks,
-        lad.lists@.len() == ticks,
-        forall|t: int| 0 <= t < ticks ==> #[trigger] level_wf(nodes@, lad.levels@[t], lad.lists@[t], side, t, ticks),
-        from <= ticks,
-    ensures
-        from <= r <= ticks,
-        forall|t: int| from <= t < r ==> (#[trigger] lad.lists@[t]).len() == 0,
-        r < ticks ==> lad.lists@[r as int].len() > 0,
-{
-    let mut t = from;
-    while t < ticks
-        invariant
-            from <= t <= ticks,
-            lad.levels@.len() == ticks,
-            lad.lists@.len() == ticks,
-            forall|tt: int| 0 <= tt < ticks ==> #[trigger] level_wf(nodes@, lad.levels@[tt], lad.lists@[tt], side, tt, ticks),
-            forall|tt: int| from <= tt < t ==> (#[trigger] lad.lists@[tt]).len() == 0,
-        decreases ticks - t,
-    {
-        proof { assert(level_wf(nodes@, lad.levels@[t as int], lad.lists@[t as int], side, t as int, ticks)); }
-        if lad.levels[t as usize].head != NIL {
-            return t;
+    if emptied {
+        lad.bits.clear(Ghost(nonempty(ls0)), t);
+        proof { assert(nonempty(lad.lists@) =~= nonempty(ls0).update(t as int, false)); }
+        if lad.best == t {
+            let b = lad.bits.next(Ghost(nonempty(lad.lists@)), ticks, t + 1);
+            proof {
+                assert forall|tt: int| t + 1 <= tt < b implies (#[trigger] lad.lists@[tt]).len() == 0 by {
+                    assert(!nonempty(lad.lists@)[tt]);
+                }
+                if b < ticks { assert(nonempty(lad.lists@)[b as int]); }
+            }
+            lad.best = b;
         }
-        t = t + 1;
+    } else {
+        proof { assert(nonempty(lad.lists@) =~= nonempty(ls0)); }
     }
-    t
 }
 
 /// Overwrite the quantity of the member at position `i` of level `t`.
@@ -512,7 +566,10 @@ pub fn set_qty(nodes: &mut Vec<Node>, lad: &Ladder, side: Side, ticks: u32, t: u
         ),
 {
     let ghost n0 = nodes@;
-    proof { lemma_member(n0, *lad, side, ticks, t as int, i); }
+    proof {
+        lemma_member(n0, *lad, side, ticks, t as int, i);
+        assert(level_wf(n0, lad.levels@[t as int], lad.lists@[t as int], side, t as int, ticks));
+    }
     let mut n = nodes[slot as usize];
     n.qty = qty;
     nodes[slot as usize] = n;
@@ -543,6 +600,8 @@ pub fn set_qty(nodes: &mut Vec<Node>, lad: &Ladder, side: Side, ticks: u32, t: u
                     == V0[t as int].update(i, SOrder { qty, ..V0[t as int][i] })[j] by {
                     if j != i { assert(l0[j] != slot); }
                 }
+            } else {
+                assert(level_wf(n1, lad.levels@[tt], ls[tt], side, tt, ticks));
             }
         }
     }
@@ -612,6 +671,13 @@ pub fn free_pop(nodes: &Vec<Node>, head: &mut u32, Ghost(f): Ghost<Seq<u32>>) ->
         } by {
             assert(f2[i] == f[i + 1]);
         }
+        assert(f2.no_duplicates()) by {
+            assert forall|a: int, b: int| 0 <= a < f2.len() && 0 <= b < f2.len() && a != b implies f2[a] != f2[b] by {
+                assert(f2[a] == f[a + 1] && f2[b] == f[b + 1]);
+            }
+        }
+        assert(*head == next_of(f, 0));
+        if f2.len() > 0 { assert(f2[0] == f[1]); }
         if f2.contains(slot) {
             let k = choose|k: int| 0 <= k < f2.len() && f2[k] == slot;
             assert(f[k + 1] == f[0]);
